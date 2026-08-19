@@ -31,7 +31,7 @@ Tests:
 - `pytest -v`: 29 passed
 - `PATH=".venv/bin:$PATH" ruff check .`: passed
 
-Commit hash: pending until fix commit is created
+Commit hash: e1aa126
 
 Concerns:
 - None.
