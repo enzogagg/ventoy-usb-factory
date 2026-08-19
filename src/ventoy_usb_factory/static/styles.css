@@ -1,0 +1,293 @@
+:root {
+  color-scheme: dark;
+  --bench: #111417;
+  --panel: #1b2025;
+  --panel-strong: #252b31;
+  --line: #46505a;
+  --text: #f2f5f7;
+  --muted: #a9b4bd;
+  --danger: #ff3b30;
+  --danger-bg: #3a1110;
+  --ready: #44d07b;
+  --warn: #f7c948;
+  --focus: #9ed7ff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bench);
+  color: var(--text);
+}
+
+main {
+  width: min(1380px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--text);
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled),
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+code,
+.mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: end;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 24px;
+}
+
+.eyebrow {
+  color: var(--warn);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(2.4rem, 5vw, 5.6rem);
+  line-height: 0.9;
+  margin-bottom: 16px;
+  letter-spacing: -0.06em;
+}
+
+h2 {
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lede,
+.hint,
+.empty,
+small {
+  color: var(--muted);
+}
+
+.status-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 14px 16px;
+  min-width: 260px;
+}
+
+.status-light {
+  width: 12px;
+  height: 12px;
+  background: var(--ready);
+  box-shadow: 0 0 0 4px rgba(68, 208, 123, 0.16);
+}
+
+.danger {
+  margin: 24px 0;
+  border: 2px solid var(--danger);
+  background: var(--danger-bg);
+  color: #fff5f4;
+  padding: 18px 20px;
+  font-size: 1.05rem;
+}
+
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 20px;
+}
+
+.side-stack,
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
+.panel,
+.card,
+.row-card,
+.confirm-row {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.panel {
+  padding: 20px;
+}
+
+.panel-heading,
+.job-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  padding: 16px;
+}
+
+.eligible {
+  border-color: rgba(68, 208, 123, 0.8);
+}
+
+.blocked {
+  border-color: rgba(255, 59, 48, 0.55);
+}
+
+.select-row,
+.row-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.select-row {
+  margin-bottom: 14px;
+}
+
+dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+dd {
+  margin: 2px 0 0;
+}
+
+.row-card,
+.confirm-row {
+  padding: 14px;
+}
+
+.row-card {
+  justify-content: space-between;
+}
+
+.row-card span,
+.confirm-row span {
+  display: grid;
+  gap: 4px;
+}
+
+.confirm-row {
+  display: grid;
+  gap: 10px;
+}
+
+.confirm-row input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #0c0f12;
+  color: var(--text);
+  padding: 12px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.start-button {
+  width: 100%;
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #120303;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.error {
+  min-height: 1.4em;
+  color: #ffb8b3;
+  margin: 12px 0 0;
+}
+
+.jobs-panel {
+  margin-top: 20px;
+}
+
+.job-card ul {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+.empty {
+  border: 1px dashed var(--line);
+  margin: 0;
+  padding: 16px;
+}
+
+@media (max-width: 800px) {
+  main {
+    width: min(100% - 20px, 760px);
+    padding: 16px 0;
+  }
+
+  .hero,
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .status-panel {
+    min-width: 0;
+  }
+
+  .panel-heading,
+  .job-head,
+  .row-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+}

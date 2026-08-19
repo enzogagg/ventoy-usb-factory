@@ -41,6 +41,14 @@ def test_api_lists_isos(tmp_path):
     assert {entry["key"] for entry in response.json()} == {"windows10", "windows11", "ubuntu"}
 
 
+def test_dashboard_renders_safety_warning(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/")
+
+    assert response.status_code == 200
+    assert "Ventoy USB Factory" in response.text
+    assert "erases the selected USB drive" in response.text
+
+
 def test_create_job_validation_returns_400_on_missing_confirmation(tmp_path, command_result):
     stdout = '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}'
     app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))

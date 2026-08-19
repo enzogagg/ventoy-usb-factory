@@ -7,8 +7,10 @@ from threading import Thread
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ventoy_usb_factory.commands import CommandRunner, SubprocessCommandRunner
@@ -18,6 +20,9 @@ from ventoy_usb_factory.isos import IsoService
 from ventoy_usb_factory.jobs import JobService
 from ventoy_usb_factory.models import JobStatus
 from ventoy_usb_factory.workers import DriveWorker
+
+PACKAGE_DIR = Path(__file__).parent
+templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 
 
 class CreateJobRequest(BaseModel):
@@ -49,6 +54,11 @@ def create_app(config: AppConfig | None = None, runner: CommandRunner | None = N
     worker = DriveWorker(config, runner, device_service)
     job_service = JobService(device_service, iso_service, worker, config.max_concurrent_jobs)
     app = FastAPI(title="Ventoy USB Factory")
+    app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
+
+    @app.get("/")
+    def dashboard(request: Request):
+        return templates.TemplateResponse(request, "dashboard.html")
 
     @app.get("/api/devices")
     def api_devices():

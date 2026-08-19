@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="hero">
+  <div>
+    <p class="eyebrow">Local destructive workstation</p>
+    <h1>Ventoy USB Factory</h1>
+    <p class="lede">Prepare selected USB drives with Ventoy and copy approved ISO files from this machine.</p>
+  </div>
+  <div class="status-panel" aria-live="polite">
+    <span class="status-light"></span>
+    <span data-summary>Waiting for device scan</span>
+  </div>
+</header>
+
+<section class="danger" aria-label="Destructive operation warning">
+  <strong>WARNING:</strong> Installing Ventoy erases the selected USB drive. Verify the device path, model, and size before confirming.
+</section>
+
+<div class="workbench">
+  <section id="devices" class="panel">
+    <div class="panel-heading">
+      <h2>USB drives</h2>
+      <button type="button" data-refresh>Rescan</button>
+    </div>
+    <p class="hint">Only eligible removable USB drives can be selected. No drive is selected automatically.</p>
+    <div data-devices class="card-grid"></div>
+  </section>
+
+  <aside class="side-stack">
+    <section id="isos" class="panel">
+      <h2>ISO readiness</h2>
+      <p class="hint">Select the ISO files to copy after Ventoy installation.</p>
+      <div data-isos class="stack"></div>
+    </section>
+
+    <section id="confirm" class="panel confirm-panel">
+      <h2>Confirm erase</h2>
+      <p class="hint">Type the exact confirmation string shown for each selected drive, for example <code>ERASE /dev/sdb</code>.</p>
+      <div data-confirmations class="stack"></div>
+      <button type="button" class="start-button" data-start disabled>Start preparation</button>
+      <p data-error class="error" role="alert"></p>
+    </section>
+  </aside>
+</div>
+
+<section id="jobs" class="panel jobs-panel">
+  <h2>Jobs</h2>
+  <p class="hint">Progress updates appear here after preparation starts.</p>
+  <div data-jobs class="stack"></div>
+</section>
+{% endblock %}
