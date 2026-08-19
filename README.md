@@ -11,8 +11,9 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
 cp config.example.yaml config.yaml
-ventoy-usb-factory
 ```
+
+The `ventoy-usb-factory` CLI and web app entry point will be implemented in a later task.
 
 ## Configuration
 
