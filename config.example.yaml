@@ -1,0 +1,6 @@
+host: 127.0.0.1
+port: 8080
+iso_dir: ./isos
+log_dir: ./logs
+ventoy_installer: ./ventoy/Ventoy2Disk.sh
+max_concurrent_jobs: 2
