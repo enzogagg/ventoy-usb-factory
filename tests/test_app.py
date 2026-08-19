@@ -49,6 +49,20 @@ def test_dashboard_renders_safety_warning(tmp_path):
     assert "erases the selected USB drive" in response.text
 
 
+def test_dashboard_script_avoids_dynamic_inner_html(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "innerHTML" not in response.text
+
+
+def test_dashboard_script_preserves_iso_selection_after_first_load(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "initialIsoSelectionApplied" in response.text
+
+
 def test_create_job_validation_returns_400_on_missing_confirmation(tmp_path, command_result):
     stdout = '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}'
     app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))
