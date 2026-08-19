@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -15,6 +16,7 @@ from ventoy_usb_factory.config import AppConfig, ensure_runtime_dirs, load_confi
 from ventoy_usb_factory.devices import LinuxDeviceService
 from ventoy_usb_factory.isos import IsoService
 from ventoy_usb_factory.jobs import JobService
+from ventoy_usb_factory.models import JobStatus
 from ventoy_usb_factory.workers import DriveWorker
 
 
@@ -88,12 +90,21 @@ def create_app(config: AppConfig | None = None, runner: CommandRunner | None = N
     @app.get("/api/jobs/{job_id}/events")
     def api_job_events(job_id: str):
         def stream():
-            job = job_service.get_job(job_id)
-            if job is None:
-                yield f"event: error\ndata: {json.dumps({'detail': 'Job not found'})}\n\n"
-                return
-            for event in job.events:
-                yield f"data: {json.dumps(encode(event))}\n\n"
+            last_event_index = 0
+            while True:
+                job = job_service.get_job(job_id)
+                if job is None:
+                    yield f"event: error\ndata: {json.dumps({'detail': 'Job not found'})}\n\n"
+                    return
+
+                while last_event_index < len(job.events):
+                    event = job.events[last_event_index]
+                    last_event_index += 1
+                    yield f"data: {json.dumps(encode(event))}\n\n"
+
+                if job.status not in {JobStatus.PENDING, JobStatus.RUNNING}:
+                    return
+                time.sleep(0.1)
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 

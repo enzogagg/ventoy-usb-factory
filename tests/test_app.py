@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
+from threading import Event, Thread
 
 from conftest import FakeCommandRunner
 from fastapi.testclient import TestClient
 
 from ventoy_usb_factory.app import create_app
 from ventoy_usb_factory.config import AppConfig
+from ventoy_usb_factory.models import DriveJob, JobEvent, JobStage, JobStatus, PreparationJob
 
 
 def app_config(tmp_path: Path) -> AppConfig:
@@ -58,3 +61,79 @@ def test_missing_job_returns_404(tmp_path):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Job not found"
+
+
+def test_job_events_streams_events_appended_after_connection(
+    tmp_path, command_result, monkeypatch
+):
+    worker_waiting = Event()
+    worker_can_finish = Event()
+    sse_polled_job = Event()
+    stdout = '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}'
+
+    class ControlledJobService:
+        def __init__(self, devices, isos, worker, max_concurrent_jobs):
+            self.devices = devices
+            self.job = None
+
+        def create_job(self, device_paths, iso_keys, confirmations):
+            device = self.devices.list_devices()[0]
+            self.job = PreparationJob(
+                id="job-1",
+                drives=[DriveJob(device=device)],
+                iso_keys=list(iso_keys),
+            )
+            return self.job
+
+        def run_job(self, job_id):
+            assert self.job is not None
+            self.job.status = JobStatus.RUNNING
+            worker_waiting.set()
+            assert worker_can_finish.wait(timeout=1)
+            self.job.events.append(
+                JobEvent(
+                    job_id=job_id,
+                    device_path=str(self.job.drives[0].device.path),
+                    stage=JobStage.REVALIDATING,
+                    message="streamed after connect",
+                )
+            )
+            self.job.status = JobStatus.COMPLETED
+
+        def get_job(self, job_id):
+            if self.job is not None and self.job.status == JobStatus.RUNNING:
+                sse_polled_job.set()
+            return self.job if self.job is not None and self.job.id == job_id else None
+
+        def list_jobs(self):
+            return [self.job] if self.job is not None else []
+
+    monkeypatch.setattr("ventoy_usb_factory.app.JobService", ControlledJobService)
+    app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))
+    client = TestClient(app)
+    job_response = client.post(
+        "/api/jobs",
+        json={
+            "device_paths": ["/dev/sdb"],
+            "iso_keys": ["ubuntu"],
+            "confirmations": {"/dev/sdb": "ERASE /dev/sdb"},
+        },
+    )
+    job_id = job_response.json()["id"]
+    assert worker_waiting.wait(timeout=1)
+
+    body: list[str] = []
+
+    def read_stream():
+        response = client.get(f"/api/jobs/{job_id}/events")
+        body.append(response.text)
+
+    stream_thread = Thread(target=read_stream)
+    stream_thread.start()
+    assert sse_polled_job.wait(timeout=1)
+    worker_can_finish.set()
+    stream_thread.join(timeout=1)
+
+    assert not stream_thread.is_alive()
+    data_lines = [line for line in body[0].splitlines() if line.startswith("data: ")]
+    assert json.loads(data_lines[0].removeprefix("data: "))["message"] == "streamed after connect"
