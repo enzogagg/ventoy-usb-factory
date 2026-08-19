@@ -1,0 +1,124 @@
+from pathlib import Path
+
+import pytest
+
+from ventoy_usb_factory.jobs import JobService
+from ventoy_usb_factory.models import JobEvent, JobStage, JobStatus, SafetyStatus, UsbDevice
+
+
+class FakeDeviceService:
+    def __init__(self, devices: list[UsbDevice]):
+        self.devices = devices
+
+    def list_devices(self) -> list[UsbDevice]:
+        return self.devices
+
+
+class FakeIsoService:
+    def __init__(self, iso_paths: list[Path]):
+        self.iso_paths = iso_paths
+        self.requested_keys: list[str] | None = None
+
+    def ready_iso_paths(self, keys: list[str]) -> list[Path]:
+        self.requested_keys = keys
+        return self.iso_paths
+
+
+class FakeWorker:
+    def __init__(self, failures: set[Path] | None = None):
+        self.failures = failures or set()
+        self.calls: list[tuple[str, Path, list[Path]]] = []
+
+    def prepare_drive(
+        self,
+        job_id: str,
+        device: UsbDevice,
+        iso_paths: list[Path],
+        emit,
+    ) -> None:
+        self.calls.append((job_id, device.path, iso_paths))
+        if device.path in self.failures:
+            raise RuntimeError(f"failed {device.path}")
+        emit(JobEvent(job_id, str(device.path), JobStage.COMPLETE, "complete"))
+
+
+def device(path: str, safety: SafetyStatus = SafetyStatus.ELIGIBLE) -> UsbDevice:
+    name = Path(path).name
+    return UsbDevice(
+        path=Path(path),
+        name=name,
+        model="Flash",
+        vendor="USB",
+        serial=f"serial-{name}",
+        size_bytes=16_000_000_000,
+        removable=True,
+        transport="usb",
+        partitions=[],
+        safety=safety,
+        safety_reason=safety.value,
+    )
+
+
+def service(
+    devices: list[UsbDevice],
+    worker: FakeWorker | None = None,
+    isos: FakeIsoService | None = None,
+) -> JobService:
+    return JobService(
+        FakeDeviceService(devices),
+        isos or FakeIsoService([Path("/isos/ubuntu.iso")]),
+        worker or FakeWorker(),
+        max_concurrent_jobs=2,
+    )
+
+
+def test_create_job_requires_exact_confirmation_per_device():
+    job_service = service([device("/dev/sdb")])
+
+    with pytest.raises(ValueError, match="confirmation"):
+        job_service.create_job([Path("/dev/sdb")], ["ubuntu"], {"/dev/sdb": "erase /dev/sdb"})
+
+
+def test_create_job_rejects_unsafe_device():
+    job_service = service([device("/dev/sda", SafetyStatus.UNSAFE_SYSTEM_DISK)])
+
+    with pytest.raises(ValueError, match="not eligible"):
+        job_service.create_job([Path("/dev/sda")], ["ubuntu"], {"/dev/sda": "ERASE /dev/sda"})
+
+
+def test_run_job_calls_worker_and_marks_job_completed():
+    worker = FakeWorker()
+    isos = FakeIsoService([Path("/isos/ubuntu.iso")])
+    job_service = service([device("/dev/sdb")], worker=worker, isos=isos)
+    job = job_service.create_job([Path("/dev/sdb")], ["ubuntu"], {"/dev/sdb": "ERASE /dev/sdb"})
+
+    job_service.run_job(job.id)
+
+    assert isos.requested_keys == ["ubuntu"]
+    assert worker.calls == [(job.id, Path("/dev/sdb"), [Path("/isos/ubuntu.iso")])]
+    assert job.status == JobStatus.COMPLETED
+    assert job.drives[0].status == JobStatus.COMPLETED
+    assert job.drives[0].stage == JobStage.COMPLETE
+
+
+def test_run_job_keeps_unrelated_drive_running_when_one_drive_fails():
+    worker = FakeWorker(failures={Path("/dev/sdb")})
+    job_service = service([device("/dev/sdb"), device("/dev/sdc")], worker=worker)
+    job = job_service.create_job(
+        [Path("/dev/sdb"), Path("/dev/sdc")],
+        ["ubuntu"],
+        {"/dev/sdb": "ERASE /dev/sdb", "/dev/sdc": "ERASE /dev/sdc"},
+    )
+
+    job_service.run_job(job.id)
+
+    drives = {drive.device.path: drive for drive in job.drives}
+    assert drives[Path("/dev/sdb")].status == JobStatus.FAILED
+    assert drives[Path("/dev/sdb")].stage == JobStage.FAILED
+    assert drives[Path("/dev/sdc")].status == JobStatus.COMPLETED
+    assert drives[Path("/dev/sdc")].stage == JobStage.COMPLETE
+    assert job.status == JobStatus.FAILED
+    assert {call[1] for call in worker.calls} == {Path("/dev/sdb"), Path("/dev/sdc")}
+    assert any(
+        event.device_path == "/dev/sdb" and event.stage == JobStage.FAILED for event in job.events
+    )
