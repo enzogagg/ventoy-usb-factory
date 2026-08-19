@@ -25,8 +25,9 @@ class FakeIsoService:
 
 
 class FakeWorker:
-    def __init__(self, failures: set[Path] | None = None):
+    def __init__(self, failures: set[Path] | None = None, value_failures: set[Path] | None = None):
         self.failures = failures or set()
+        self.value_failures = value_failures or set()
         self.calls: list[tuple[str, Path, list[Path]]] = []
 
     def prepare_drive(
@@ -37,6 +38,8 @@ class FakeWorker:
         emit,
     ) -> None:
         self.calls.append((job_id, device.path, iso_paths))
+        if device.path in self.value_failures:
+            raise ValueError(f"invalid {device.path}")
         if device.path in self.failures:
             raise RuntimeError(f"failed {device.path}")
         emit(JobEvent(job_id, str(device.path), JobStage.COMPLETE, "complete"))
@@ -121,4 +124,30 @@ def test_run_job_keeps_unrelated_drive_running_when_one_drive_fails():
     assert {call[1] for call in worker.calls} == {Path("/dev/sdb"), Path("/dev/sdc")}
     assert any(
         event.device_path == "/dev/sdb" and event.stage == JobStage.FAILED for event in job.events
+    )
+
+
+def test_run_job_handles_non_runtime_worker_failure_without_stopping_other_drives():
+    worker = FakeWorker(value_failures={Path("/dev/sdb")})
+    job_service = service([device("/dev/sdb"), device("/dev/sdc")], worker=worker)
+    job = job_service.create_job(
+        [Path("/dev/sdb"), Path("/dev/sdc")],
+        ["ubuntu"],
+        {"/dev/sdb": "ERASE /dev/sdb", "/dev/sdc": "ERASE /dev/sdc"},
+    )
+
+    job_service.run_job(job.id)
+
+    drives = {drive.device.path: drive for drive in job.drives}
+    assert drives[Path("/dev/sdb")].status == JobStatus.FAILED
+    assert drives[Path("/dev/sdb")].stage == JobStage.FAILED
+    assert drives[Path("/dev/sdb")].error == "invalid /dev/sdb"
+    assert drives[Path("/dev/sdc")].status == JobStatus.COMPLETED
+    assert drives[Path("/dev/sdc")].stage == JobStage.COMPLETE
+    assert job.status == JobStatus.FAILED
+    assert any(
+        event.device_path == "/dev/sdb"
+        and event.stage == JobStage.FAILED
+        and event.message == "invalid /dev/sdb"
+        for event in job.events
     )

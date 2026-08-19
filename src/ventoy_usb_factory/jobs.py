@@ -75,7 +75,7 @@ class JobService:
 
                 try:
                     self.worker.prepare_drive(job.id, drive.device, iso_paths, emit)
-                except RuntimeError as exc:
+                except Exception as exc:  # noqa: BLE001 - isolate each drive worker failure.
                     drive.status = JobStatus.FAILED
                     drive.stage = JobStage.FAILED
                     drive.error = str(exc)
