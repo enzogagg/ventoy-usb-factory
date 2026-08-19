@@ -22,8 +22,13 @@ class DriveWorker:
     ) -> None:
         self._emit(emit, job_id, device, JobStage.REVALIDATING, "Revalidating selected device")
         current = self.devices.find_eligible_by_path(device.path)
-        if current is None or current.serial != device.serial or current.size_bytes != device.size_bytes:
+        if current is None:
             raise RuntimeError(f"Device {device.path} is no longer eligible or changed identity")
+        if not self._is_same_device(current, device):
+            raise RuntimeError(f"Device {device.path} is no longer eligible or changed identity")
+
+        mount_dir = self._safe_mount_dir(device)
+        data_partition = self._data_partition_path(device.path)
 
         self._emit(emit, job_id, device, JobStage.UNMOUNTING, "Unmounting existing partitions")
         for partition in device.partitions:
@@ -35,10 +40,6 @@ class DriveWorker:
 
         self._emit(emit, job_id, device, JobStage.WAITING_FOR_PARTITIONS, "Refreshing partition table")
         self._run(["partprobe", str(device.path)])
-
-        mount_dir = self.config.log_dir / "mnt" / device.name
-        mount_dir.mkdir(parents=True, exist_ok=True)
-        data_partition = Path(f"{device.path}1")
 
         self._emit(emit, job_id, device, JobStage.MOUNTING, "Mounting Ventoy data partition")
         self._run(["mount", str(data_partition), str(mount_dir)])
@@ -55,9 +56,53 @@ class DriveWorker:
         self._emit(emit, job_id, device, JobStage.COMPLETE, "Drive complete")
 
     def _run(self, args: list[str]) -> None:
+        self.config.log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = self.config.log_dir / "commands.log"
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"START {args!r}\n")
         result = self.runner.run(args)
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"END returncode={result.returncode} {args!r}\n")
         if result.returncode != 0:
             raise RuntimeError(result.stderr or f"Command failed: {args}")
+
+    def _is_same_device(self, current: UsbDevice, confirmed: UsbDevice) -> bool:
+        return (
+            current.path,
+            current.name,
+            current.model,
+            current.vendor,
+            current.serial,
+            current.size_bytes,
+            current.removable,
+            current.transport,
+        ) == (
+            confirmed.path,
+            confirmed.name,
+            confirmed.model,
+            confirmed.vendor,
+            confirmed.serial,
+            confirmed.size_bytes,
+            confirmed.removable,
+            confirmed.transport,
+        )
+
+    def _data_partition_path(self, device_path: Path) -> Path:
+        suffix = "p1" if device_path.name[-1:].isdigit() else "1"
+        return device_path.with_name(f"{device_path.name}{suffix}")
+
+    def _safe_mount_dir(self, device: UsbDevice) -> Path:
+        mount_root = self.config.log_dir / "mnt"
+        mount_root.mkdir(parents=True, exist_ok=True)
+        resolved_root = mount_root.resolve()
+        mount_dir = mount_root / device.name
+        if mount_dir.is_symlink():
+            raise RuntimeError(f"Unsafe mount directory: {mount_dir}")
+        resolved_mount_dir = mount_dir.resolve()
+        if not resolved_mount_dir.is_relative_to(resolved_root):
+            raise RuntimeError(f"Unsafe mount directory: {mount_dir}")
+        mount_dir.mkdir(parents=True, exist_ok=True)
+        return mount_dir
 
     def _emit(
         self,

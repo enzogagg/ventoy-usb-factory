@@ -36,24 +36,42 @@ def eligible_device() -> UsbDevice:
     )
 
 
+def nvme_device() -> UsbDevice:
+    return UsbDevice(
+        Path("/dev/nvme0n1"),
+        "nvme0n1",
+        "FastFlash",
+        "USB",
+        "NVME-ABC",
+        64000000000,
+        True,
+        "usb",
+        [],
+        SafetyStatus.ELIGIBLE,
+        "eligible removable USB storage",
+    )
+
+
+def successful_results(command_result, lsblk_stdout: str, iso_count: int = 1):
+    return [
+        command_result(["lsblk"], stdout=lsblk_stdout),
+        command_result(["umount"]),
+        command_result(["ventoy"]),
+        command_result(["partprobe"]),
+        command_result(["mount"]),
+        *[command_result(["rsync"]) for _ in range(iso_count)],
+        command_result(["sync"]),
+        command_result(["umount"]),
+    ]
+
+
 def test_prepare_drive_uses_argument_arrays_calls_installer_and_completes(
     tmp_path: Path, command_result
 ):
     lsblk_stdout = """
     {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
     """
-    runner = FakeCommandRunner(
-        [
-            command_result(["lsblk"], stdout=lsblk_stdout),
-            command_result(["umount"]),
-            command_result(["ventoy"]),
-            command_result(["partprobe"]),
-            command_result(["mount"]),
-            command_result(["rsync"]),
-            command_result(["sync"]),
-            command_result(["umount"]),
-        ]
-    )
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout))
     events: list[JobEvent] = []
     app_config = config(tmp_path)
 
@@ -67,6 +85,79 @@ def test_prepare_drive_uses_argument_arrays_calls_installer_and_completes(
     assert ["umount", "/dev/sdb1"] in runner.calls
     assert ["partprobe", "/dev/sdb"] in runner.calls
     assert ["sync"] in runner.calls
+
+
+@pytest.mark.parametrize(
+    "lsblk_stdout",
+    [
+        '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"OtherFlash","vendor":"USB","serial":"ABC","children":[]}]}',
+        '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"OtherVendor","serial":"ABC","children":[]}]}',
+        '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":null,"children":[]}]}',
+    ],
+)
+def test_prepare_drive_refuses_identity_mismatch_before_destructive_commands(
+    tmp_path: Path, command_result, lsblk_stdout: str
+):
+    runner = FakeCommandRunner([command_result(["lsblk"], stdout=lsblk_stdout)])
+    events: list[JobEvent] = []
+    worker = DriveWorker(config(tmp_path), runner, LinuxDeviceService(runner))
+
+    with pytest.raises(RuntimeError, match="changed identity"):
+        worker.prepare_drive("job-1", eligible_device(), [], events.append)
+
+    assert len(runner.calls) == 1
+
+
+def test_prepare_drive_logs_before_and_after_commands(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    app_config = config(tmp_path)
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout))
+    worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
+
+    worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], lambda event: None)
+
+    log_text = (app_config.log_dir / "commands.log").read_text(encoding="utf-8")
+    assert "START ['sudo'" in log_text
+    assert "END returncode=0 ['sudo'" in log_text
+
+
+def test_prepare_drive_uses_p1_suffix_for_numeric_device_names(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"nvme0n1","path":"/dev/nvme0n1","type":"disk","rm":true,"tran":"usb","size":64000000000,"model":"FastFlash","vendor":"USB","serial":"NVME-ABC","children":[]}]}
+    """
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, iso_count=0))
+    worker = DriveWorker(config(tmp_path), runner, LinuxDeviceService(runner))
+
+    worker.prepare_drive("job-1", nvme_device(), [], lambda event: None)
+
+    mount_calls = [call for call in runner.calls if call and call[0] == "mount"]
+    assert mount_calls == [["mount", "/dev/nvme0n1p1", str(tmp_path / "logs" / "mnt" / "nvme0n1")]]
+
+
+def test_prepare_drive_rejects_symlink_mount_dir(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    app_config = config(tmp_path)
+    mount_root = app_config.log_dir / "mnt"
+    mount_root.mkdir(parents=True)
+    (mount_root / "sdb").symlink_to(tmp_path)
+    runner = FakeCommandRunner(
+        [
+            command_result(["lsblk"], stdout=lsblk_stdout),
+            command_result(["umount"]),
+            command_result(["ventoy"]),
+            command_result(["partprobe"]),
+        ]
+    )
+    worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
+
+    with pytest.raises(RuntimeError, match="Unsafe mount directory"):
+        worker.prepare_drive("job-1", eligible_device(), [], lambda event: None)
+
+    assert not any(call and call[0] == "mount" for call in runner.calls)
 
 
 @pytest.mark.parametrize(
