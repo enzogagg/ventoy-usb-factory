@@ -52,12 +52,19 @@ def nvme_device() -> UsbDevice:
     )
 
 
-def successful_results(command_result, lsblk_stdout: str, iso_count: int = 1):
+def successful_results(
+    command_result,
+    initial_lsblk_stdout: str,
+    refreshed_lsblk_stdout: str,
+    iso_count: int = 1,
+    unmount_count: int = 1,
+):
     return [
-        command_result(["lsblk"], stdout=lsblk_stdout),
-        command_result(["umount"]),
+        command_result(["lsblk"], stdout=initial_lsblk_stdout),
+        *[command_result(["umount"]) for _ in range(unmount_count)],
         command_result(["ventoy"]),
         command_result(["partprobe"]),
+        command_result(["lsblk"], stdout=refreshed_lsblk_stdout),
         command_result(["mount"]),
         *[command_result(["rsync"]) for _ in range(iso_count)],
         command_result(["sync"]),
@@ -71,7 +78,12 @@ def test_prepare_drive_uses_argument_arrays_calls_installer_and_completes(
     lsblk_stdout = """
     {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
     """
-    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout))
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, refreshed_lsblk_stdout))
     events: list[JobEvent] = []
     app_config = config(tmp_path)
 
@@ -81,9 +93,11 @@ def test_prepare_drive_uses_argument_arrays_calls_installer_and_completes(
     assert events[0].stage == JobStage.REVALIDATING
     assert events[-1].stage == JobStage.COMPLETE
     assert all(isinstance(call, list) for call in runner.calls)
+    assert len([call for call in runner.calls if call and call[0] == "lsblk"]) == 2
     assert ["sudo", str(app_config.ventoy_installer), "-I", "/dev/sdb"] in runner.calls
     assert ["umount", "/dev/sdb1"] in runner.calls
     assert ["partprobe", "/dev/sdb"] in runner.calls
+    assert ["mount", "/dev/sdb1", str(tmp_path / "logs" / "mnt" / "sdb")] in runner.calls
     assert ["sync"] in runner.calls
 
 
@@ -112,8 +126,13 @@ def test_prepare_drive_logs_before_and_after_commands(tmp_path: Path, command_re
     lsblk_stdout = """
     {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
     """
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
     app_config = config(tmp_path)
-    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout))
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, refreshed_lsblk_stdout))
     worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
 
     worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], lambda event: None)
@@ -127,13 +146,43 @@ def test_prepare_drive_uses_p1_suffix_for_numeric_device_names(tmp_path: Path, c
     lsblk_stdout = """
     {"blockdevices":[{"name":"nvme0n1","path":"/dev/nvme0n1","type":"disk","rm":true,"tran":"usb","size":64000000000,"model":"FastFlash","vendor":"USB","serial":"NVME-ABC","children":[]}]}
     """
-    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, iso_count=0))
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"nvme0n1","path":"/dev/nvme0n1","type":"disk","rm":true,"tran":"usb","size":64000000000,"model":"FastFlash","vendor":"USB","serial":"NVME-ABC","children":[
+      {"name":"nvme0n1p1","path":"/dev/nvme0n1p1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    runner = FakeCommandRunner(
+        successful_results(
+            command_result, lsblk_stdout, refreshed_lsblk_stdout, iso_count=0, unmount_count=0
+        )
+    )
     worker = DriveWorker(config(tmp_path), runner, LinuxDeviceService(runner))
 
     worker.prepare_drive("job-1", nvme_device(), [], lambda event: None)
 
     mount_calls = [call for call in runner.calls if call and call[0] == "mount"]
     assert mount_calls == [["mount", "/dev/nvme0n1p1", str(tmp_path / "logs" / "mnt" / "nvme0n1")]]
+
+
+def test_prepare_drive_refuses_to_mount_without_refreshed_partition(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    runner = FakeCommandRunner(
+        [
+            command_result(["lsblk"], stdout=lsblk_stdout),
+            command_result(["umount"]),
+            command_result(["ventoy"]),
+            command_result(["partprobe"]),
+            command_result(["lsblk"], stdout=lsblk_stdout),
+        ]
+    )
+    worker = DriveWorker(config(tmp_path), runner, LinuxDeviceService(runner))
+
+    with pytest.raises(RuntimeError, match="No usable data partition"):
+        worker.prepare_drive("job-1", eligible_device(), [], lambda event: None)
+
+    assert not any(call and call[0] == "mount" for call in runner.calls)
 
 
 def test_prepare_drive_rejects_symlink_mount_dir(tmp_path: Path, command_result):
@@ -158,6 +207,23 @@ def test_prepare_drive_rejects_symlink_mount_dir(tmp_path: Path, command_result)
         worker.prepare_drive("job-1", eligible_device(), [], lambda event: None)
 
     assert not any(call and call[0] == "mount" for call in runner.calls)
+
+
+def test_prepare_drive_rejects_symlink_mount_root(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    app_config = config(tmp_path)
+    app_config.log_dir.mkdir(parents=True)
+    (tmp_path / "outside").mkdir()
+    (app_config.log_dir / "mnt").symlink_to(tmp_path / "outside")
+    runner = FakeCommandRunner([command_result(["lsblk"], stdout=lsblk_stdout)])
+    worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
+
+    with pytest.raises(RuntimeError, match="Unsafe mount directory"):
+        worker.prepare_drive("job-1", eligible_device(), [], lambda event: None)
+
+    assert not any(call and call[0] == "umount" for call in runner.calls)
 
 
 @pytest.mark.parametrize(

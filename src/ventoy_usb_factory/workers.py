@@ -28,7 +28,6 @@ class DriveWorker:
             raise RuntimeError(f"Device {device.path} is no longer eligible or changed identity")
 
         mount_dir = self._safe_mount_dir(device)
-        data_partition = self._data_partition_path(device.path)
 
         self._emit(emit, job_id, device, JobStage.UNMOUNTING, "Unmounting existing partitions")
         for partition in device.partitions:
@@ -40,6 +39,10 @@ class DriveWorker:
 
         self._emit(emit, job_id, device, JobStage.WAITING_FOR_PARTITIONS, "Refreshing partition table")
         self._run(["partprobe", str(device.path)])
+        refreshed = self.devices.find_eligible_by_path(device.path)
+        if refreshed is None or not self._is_same_device(refreshed, device):
+            raise RuntimeError(f"Device {device.path} is no longer eligible or changed identity")
+        data_partition = self._data_partition(refreshed)
 
         self._emit(emit, job_id, device, JobStage.MOUNTING, "Mounting Ventoy data partition")
         self._run(["mount", str(data_partition), str(mount_dir)])
@@ -87,21 +90,32 @@ class DriveWorker:
             confirmed.transport,
         )
 
-    def _data_partition_path(self, device_path: Path) -> Path:
-        suffix = "p1" if device_path.name[-1:].isdigit() else "1"
-        return device_path.with_name(f"{device_path.name}{suffix}")
+    def _data_partition(self, device: UsbDevice) -> Path:
+        partition_ones = [partition for partition in device.partitions if partition.name.endswith("1")]
+        if partition_ones:
+            return partition_ones[0].path
+        if len(device.partitions) == 1:
+            return device.partitions[0].path
+        raise RuntimeError(f"No usable data partition found for {device.path}")
 
     def _safe_mount_dir(self, device: UsbDevice) -> Path:
-        mount_root = self.config.log_dir / "mnt"
+        if self.config.log_dir.is_symlink():
+            raise RuntimeError(f"Unsafe mount directory: {self.config.log_dir}")
+        self.config.log_dir.mkdir(parents=True, exist_ok=True)
+        resolved_log_dir = self.config.log_dir.resolve()
+
+        mount_root = resolved_log_dir / "mnt"
+        if mount_root.is_symlink():
+            raise RuntimeError(f"Unsafe mount directory: {mount_root}")
         mount_root.mkdir(parents=True, exist_ok=True)
         resolved_root = mount_root.resolve()
         mount_dir = mount_root / device.name
         if mount_dir.is_symlink():
             raise RuntimeError(f"Unsafe mount directory: {mount_dir}")
+        mount_dir.mkdir(parents=True, exist_ok=True)
         resolved_mount_dir = mount_dir.resolve()
         if not resolved_mount_dir.is_relative_to(resolved_root):
             raise RuntimeError(f"Unsafe mount directory: {mount_dir}")
-        mount_dir.mkdir(parents=True, exist_ok=True)
         return mount_dir
 
     def _emit(
