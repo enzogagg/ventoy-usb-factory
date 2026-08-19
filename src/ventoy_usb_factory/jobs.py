@@ -30,6 +30,8 @@ class JobService:
     ) -> PreparationJob:
         if not device_paths:
             raise ValueError("At least one device is required")
+        if len(set(device_paths)) != len(device_paths):
+            raise ValueError("Duplicate device paths are not allowed")
 
         current_devices = {device.path: device for device in self.devices.list_devices()}
         drives: list[DriveJob] = []
@@ -61,6 +63,24 @@ class JobService:
             raise ValueError(f"Unknown job: {job_id}")
 
         iso_paths = self.isos.ready_iso_paths(job.iso_keys)
+        if not iso_paths:
+            message = "No ready ISO files selected"
+            with self._lock:
+                job.status = JobStatus.FAILED
+                for drive in job.drives:
+                    drive.status = JobStatus.FAILED
+                    drive.stage = JobStage.FAILED
+                    drive.error = message
+                    job.events.append(
+                        JobEvent(
+                            job_id=job.id,
+                            device_path=str(drive.device.path),
+                            stage=JobStage.FAILED,
+                            message=message,
+                        )
+                    )
+            return
+
         job.status = JobStatus.RUNNING
         semaphore = Semaphore(self.max_concurrent_jobs)
 

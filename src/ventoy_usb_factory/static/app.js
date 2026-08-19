@@ -6,6 +6,7 @@ const state = {
   selectedIsos: new Set(),
   confirmations: {},
   initialIsoSelectionApplied: false,
+  jobEventStreams: new Map(),
 };
 
 const els = {
@@ -63,10 +64,48 @@ async function refreshAll() {
     state.isos = isos;
     state.jobs = jobs;
     applyInitialIsoSelection(isos);
+    watchRunningJobs(jobs);
     render();
   } catch (error) {
     showError(error.message);
   }
+}
+
+async function refreshJob(jobId) {
+  const job = await fetchJson(`/api/jobs/${jobId}`);
+  const index = state.jobs.findIndex((entry) => entry.id === job.id);
+  if (index === -1) state.jobs.unshift(job);
+  else state.jobs[index] = job;
+  renderJobs();
+  if (job.status !== "pending" && job.status !== "running") closeJobEventStream(job.id);
+}
+
+function watchRunningJobs(jobs) {
+  for (const job of jobs) {
+    if (job.status === "pending" || job.status === "running") watchJobEvents(job);
+  }
+}
+
+function watchJobEvents(job) {
+  if (!window.EventSource || state.jobEventStreams.has(job.id)) return;
+
+  const stream = new EventSource(`/api/jobs/${job.id}/events`);
+  state.jobEventStreams.set(job.id, stream);
+  stream.addEventListener("message", async () => {
+    try {
+      await refreshJob(job.id);
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+  stream.addEventListener("error", () => closeJobEventStream(job.id));
+}
+
+function closeJobEventStream(jobId) {
+  const stream = state.jobEventStreams.get(jobId);
+  if (!stream) return;
+  stream.close();
+  state.jobEventStreams.delete(jobId);
 }
 
 function applyInitialIsoSelection(isos) {
@@ -228,7 +267,7 @@ function clearError() {
 async function startJob() {
   clearError();
   try {
-    await fetchJson("/api/jobs", {
+    const job = await fetchJson("/api/jobs", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
@@ -237,6 +276,7 @@ async function startJob() {
         confirmations: state.confirmations,
       }),
     });
+    watchJobEvents(job);
     state.selectedDevices.clear();
     state.confirmations = {};
     await refreshAll();

@@ -97,3 +97,29 @@ def test_list_devices_rejects_boot_efi_mountpoint(command_result):
     devices = service.list_devices()
 
     assert devices[0].safety == SafetyStatus.UNSAFE_SYSTEM_DISK
+
+
+def test_list_devices_rejects_home_descendant_mountpoint(command_result):
+    stdout = """
+    {"blockdevices":[{"name":"sdg","path":"/dev/sdg","type":"disk","rm":true,"tran":"usb","size":1000000000,"model":"Disk","vendor":"USB","serial":"D5","children":[
+      {"name":"sdg1","path":"/dev/sdg1","type":"part","mountpoints":["/home/user"],"fstype":"ext4","label":"home"}
+    ]}]}
+    """
+    service = LinuxDeviceService(FakeCommandRunner([command_result(LSBLK_ARGS, stdout=stdout)]))
+
+    devices = service.list_devices()
+
+    assert devices[0].safety == SafetyStatus.UNSAFE_SYSTEM_DISK
+
+
+def test_list_devices_rejects_var_descendant_mountpoint(command_result):
+    stdout = """
+    {"blockdevices":[{"name":"sdh","path":"/dev/sdh","type":"disk","rm":true,"tran":"usb","size":1000000000,"model":"Disk","vendor":"USB","serial":"D6","children":[
+      {"name":"sdh1","path":"/dev/sdh1","type":"part","mountpoints":["/var/lib"],"fstype":"ext4","label":"var"}
+    ]}]}
+    """
+    service = LinuxDeviceService(FakeCommandRunner([command_result(LSBLK_ARGS, stdout=stdout)]))
+
+    devices = service.list_devices()
+
+    assert devices[0].safety == SafetyStatus.UNSAFE_SYSTEM_DISK

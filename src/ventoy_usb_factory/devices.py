@@ -88,4 +88,6 @@ class LinuxDeviceService:
         return SafetyStatus.ELIGIBLE, "eligible removable USB storage"
 
     def _is_system_mountpoint(self, mountpoint: Path) -> bool:
-        return mountpoint in SYSTEM_MOUNTPOINTS or Path("/boot") in mountpoint.parents
+        return mountpoint in SYSTEM_MOUNTPOINTS or any(
+            system_mount in mountpoint.parents for system_mount in SYSTEM_MOUNTPOINTS - {Path("/")}
+        )

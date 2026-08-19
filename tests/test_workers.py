@@ -142,6 +142,54 @@ def test_prepare_drive_logs_before_and_after_commands(tmp_path: Path, command_re
     assert "END returncode=0 ['sudo'" in log_text
 
 
+def test_prepare_drive_unmounts_mounted_partition_when_rsync_fails(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    app_config = config(tmp_path)
+    mount_dir = tmp_path / "logs" / "mnt" / "sdb"
+    runner = FakeCommandRunner(
+        [
+            command_result(["lsblk"], stdout=lsblk_stdout),
+            command_result(["umount"]),
+            command_result(["ventoy"]),
+            command_result(["partprobe"]),
+            command_result(["lsblk"], stdout=refreshed_lsblk_stdout),
+            command_result(["mount"]),
+            command_result(["rsync"], stderr="copy failed", returncode=23),
+            command_result(["umount"]),
+        ]
+    )
+    worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
+
+    with pytest.raises(RuntimeError, match="copy failed"):
+        worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], lambda event: None)
+
+    assert ["umount", str(mount_dir)] in runner.calls
+
+
+@pytest.mark.parametrize("exception", [FileNotFoundError("missing binary"), ValueError("bad args")])
+def test_run_logs_end_when_command_runner_raises(tmp_path: Path, exception):
+    class RaisingRunner:
+        def run(self, args: list[str]):
+            raise exception
+
+    app_config = config(tmp_path)
+    worker = DriveWorker(app_config, RaisingRunner(), LinuxDeviceService(RaisingRunner()))
+
+    with pytest.raises(type(exception), match=str(exception)):
+        worker._run(["missing-command"])
+
+    log_text = (app_config.log_dir / "commands.log").read_text(encoding="utf-8")
+    assert "START ['missing-command']" in log_text
+    assert f"END exception={type(exception).__name__}: {exception} ['missing-command']" in log_text
+
+
 def test_prepare_drive_uses_p1_suffix_for_numeric_device_names(tmp_path: Path, command_result):
     lsblk_stdout = """
     {"blockdevices":[{"name":"nvme0n1","path":"/dev/nvme0n1","type":"disk","rm":true,"tran":"usb","size":64000000000,"model":"FastFlash","vendor":"USB","serial":"NVME-ABC","children":[]}]}

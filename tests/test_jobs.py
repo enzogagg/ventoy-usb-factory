@@ -89,6 +89,19 @@ def test_create_job_rejects_unsafe_device():
         job_service.create_job([Path("/dev/sda")], ["ubuntu"], {"/dev/sda": "ERASE /dev/sda"})
 
 
+def test_create_job_rejects_duplicate_device_paths():
+    job_service = service([device("/dev/sdb")])
+
+    with pytest.raises(ValueError, match="Duplicate device"):
+        job_service.create_job(
+            [Path("/dev/sdb"), Path("/dev/sdb")],
+            ["ubuntu"],
+            {"/dev/sdb": "ERASE /dev/sdb"},
+        )
+
+    assert job_service.list_jobs() == []
+
+
 def test_run_job_calls_worker_and_marks_job_completed():
     worker = FakeWorker()
     isos = FakeIsoService([Path("/isos/ubuntu.iso")])
@@ -151,3 +164,23 @@ def test_run_job_handles_non_runtime_worker_failure_without_stopping_other_drive
         and event.message == "invalid /dev/sdb"
         for event in job.events
     )
+
+
+def test_run_job_refuses_when_no_ready_iso_paths():
+    worker = FakeWorker()
+    job_service = service([device("/dev/sdb"), device("/dev/sdc")], worker=worker, isos=FakeIsoService([]))
+    job = job_service.create_job(
+        [Path("/dev/sdb"), Path("/dev/sdc")],
+        ["ubuntu"],
+        {"/dev/sdb": "ERASE /dev/sdb", "/dev/sdc": "ERASE /dev/sdc"},
+    )
+
+    job_service.run_job(job.id)
+
+    assert worker.calls == []
+    assert job.status == JobStatus.FAILED
+    assert all(drive.status == JobStatus.FAILED for drive in job.drives)
+    assert all(drive.stage == JobStage.FAILED for drive in job.drives)
+    assert {drive.error for drive in job.drives} == {"No ready ISO files selected"}
+    assert [event.stage for event in job.events] == [JobStage.FAILED, JobStage.FAILED]
+    assert all(event.message == "No ready ISO files selected" for event in job.events)

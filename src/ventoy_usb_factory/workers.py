@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
 from ventoy_usb_factory.commands import CommandRunner
@@ -46,16 +47,24 @@ class DriveWorker:
 
         self._emit(emit, job_id, device, JobStage.MOUNTING, "Mounting Ventoy data partition")
         self._run(["mount", str(data_partition), str(mount_dir)])
+        mounted = True
 
-        self._emit(emit, job_id, device, JobStage.COPYING_ISOS, "Copying ISO files")
-        for iso_path in iso_paths:
-            self._run(["rsync", "-ah", "--progress", str(iso_path), str(mount_dir / iso_path.name)])
+        try:
+            self._emit(emit, job_id, device, JobStage.COPYING_ISOS, "Copying ISO files")
+            for iso_path in iso_paths:
+                self._run(["rsync", "-ah", "--progress", str(iso_path), str(mount_dir / iso_path.name)])
 
-        self._emit(emit, job_id, device, JobStage.SYNCING, "Syncing filesystem buffers")
-        self._run(["sync"])
+            self._emit(emit, job_id, device, JobStage.SYNCING, "Syncing filesystem buffers")
+            self._run(["sync"])
 
-        self._emit(emit, job_id, device, JobStage.UNMOUNTING_FINAL, "Unmounting Ventoy data partition")
-        self._run(["umount", str(mount_dir)])
+            self._emit(emit, job_id, device, JobStage.UNMOUNTING_FINAL, "Unmounting Ventoy data partition")
+            mounted = False
+            self._run(["umount", str(mount_dir)])
+        except Exception:
+            if mounted:
+                with suppress(Exception):
+                    self._run(["umount", str(mount_dir)])
+            raise
         self._emit(emit, job_id, device, JobStage.COMPLETE, "Drive complete")
 
     def _run(self, args: list[str]) -> None:
@@ -63,7 +72,12 @@ class DriveWorker:
         log_path = self.config.log_dir / "commands.log"
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(f"START {args!r}\n")
-        result = self.runner.run(args)
+        try:
+            result = self.runner.run(args)
+        except Exception as exc:
+            with log_path.open("a", encoding="utf-8") as log_file:
+                log_file.write(f"END exception={type(exc).__name__}: {exc} {args!r}\n")
+            raise
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(f"END returncode={result.returncode} {args!r}\n")
         if result.returncode != 0:
