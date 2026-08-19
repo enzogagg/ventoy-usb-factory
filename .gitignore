@@ -1,1 +1,10 @@
 .superpowers/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+config.yaml
+isos/
+logs/
+ventoy/
+*.egg-info/
