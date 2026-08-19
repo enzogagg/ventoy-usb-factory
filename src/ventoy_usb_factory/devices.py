@@ -11,7 +11,14 @@ LSBLK_ARGS = [
     "--output",
     "NAME,PATH,TYPE,RM,TRAN,SIZE,MODEL,VENDOR,SERIAL,MOUNTPOINTS,FSTYPE,LABEL",
 ]
-SYSTEM_MOUNTPOINTS = {Path("/"), Path("/boot"), Path("/home")}
+SYSTEM_MOUNTPOINTS = {
+    Path("/"),
+    Path("/boot"),
+    Path("/boot/efi"),
+    Path("/home"),
+    Path("/var"),
+    Path("/usr"),
+}
 
 
 class LinuxDeviceService:
@@ -37,7 +44,7 @@ class LinuxDeviceService:
         return None
 
     def _device_from_raw(self, raw: dict) -> UsbDevice:
-        partitions = [self._partition_from_raw(child) for child in raw.get("children") or []]
+        partitions = [self._partition_from_raw(child) for child in self._iter_children(raw)]
         safety, reason = self._classify(raw, partitions)
         return UsbDevice(
             path=Path(raw["path"]),
@@ -63,12 +70,22 @@ class LinuxDeviceService:
             label=raw.get("label"),
         )
 
+    def _iter_children(self, raw: dict) -> list[dict]:
+        children = []
+        for child in raw.get("children") or []:
+            children.append(child)
+            children.extend(self._iter_children(child))
+        return children
+
     def _classify(
         self, raw: dict, partitions: list[BlockPartition]
     ) -> tuple[SafetyStatus, str]:
         mountpoints = {mount for partition in partitions for mount in partition.mountpoints}
-        if mountpoints & SYSTEM_MOUNTPOINTS:
+        if any(self._is_system_mountpoint(mount) for mount in mountpoints):
             return SafetyStatus.UNSAFE_SYSTEM_DISK, "contains a system mountpoint"
-        if not bool(raw.get("rm")) and raw.get("tran") != "usb":
+        if not bool(raw.get("rm")) or raw.get("tran") != "usb":
             return SafetyStatus.NOT_REMOVABLE, "device is not removable USB storage"
         return SafetyStatus.ELIGIBLE, "eligible removable USB storage"
+
+    def _is_system_mountpoint(self, mountpoint: Path) -> bool:
+        return mountpoint in SYSTEM_MOUNTPOINTS or Path("/boot") in mountpoint.parents
