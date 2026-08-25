@@ -1,4 +1,5 @@
 import json
+import platform
 import time
 from dataclasses import asdict, is_dataclass
 from enum import Enum
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 
 from ventoy_usb_factory.commands import CommandRunner, SubprocessCommandRunner
 from ventoy_usb_factory.config import AppConfig, ensure_runtime_dirs, load_config
-from ventoy_usb_factory.devices import LinuxDeviceService
+from ventoy_usb_factory.devices import LinuxDeviceService, UnsupportedDeviceService
 from ventoy_usb_factory.isos import IsoService
 from ventoy_usb_factory.jobs import JobService
 from ventoy_usb_factory.models import JobStatus
@@ -48,8 +49,13 @@ def encode(value: Any) -> Any:
 def create_app(config: AppConfig | None = None, runner: CommandRunner | None = None) -> FastAPI:
     config = config or load_config(None)
     ensure_runtime_dirs(config)
+    uses_default_runner = runner is None
     runner = runner or SubprocessCommandRunner()
-    device_service = LinuxDeviceService(runner)
+    device_service = (
+        UnsupportedDeviceService()
+        if uses_default_runner and platform.system() != "Linux"
+        else LinuxDeviceService(runner)
+    )
     iso_service = IsoService(config)
     worker = DriveWorker(config, runner, device_service)
     job_service = JobService(device_service, iso_service, worker, config.max_concurrent_jobs)
@@ -124,4 +130,9 @@ def create_app(config: AppConfig | None = None, runner: CommandRunner | None = N
 def main() -> None:
     config_path = Path("config.yaml")
     config = load_config(config_path if config_path.exists() else None)
-    uvicorn.run(create_app(config), host=config.host, port=config.port)
+    uvicorn.run(
+        "ventoy_usb_factory.app:create_app",
+        factory=True,
+        host=config.host,
+        port=config.port,
+    )

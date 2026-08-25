@@ -41,6 +41,35 @@ def test_api_lists_isos(tmp_path):
     assert {entry["key"] for entry in response.json()} == {"windows10", "windows11", "ubuntu"}
 
 
+def test_api_devices_returns_empty_list_on_non_linux_without_lsblk(tmp_path, monkeypatch):
+    monkeypatch.setattr("ventoy_usb_factory.app.platform.system", lambda: "Darwin")
+    app = create_app(app_config(tmp_path))
+
+    response = TestClient(app).get("/api/devices")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_main_runs_uvicorn_with_factory_string(tmp_path, monkeypatch):
+    calls = []
+    config = app_config(tmp_path)
+
+    monkeypatch.setattr("ventoy_usb_factory.app.load_config", lambda path: config)
+    monkeypatch.setattr("ventoy_usb_factory.app.uvicorn.run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    from ventoy_usb_factory.app import main
+
+    main()
+
+    assert calls == [
+        (
+            ("ventoy_usb_factory.app:create_app",),
+            {"factory": True, "host": "127.0.0.1", "port": 8080},
+        )
+    ]
+
+
 def test_dashboard_renders_safety_warning(tmp_path):
     response = TestClient(create_app(app_config(tmp_path))).get("/")
 

@@ -91,3 +91,11 @@ class LinuxDeviceService:
         return mountpoint in SYSTEM_MOUNTPOINTS or any(
             system_mount in mountpoint.parents for system_mount in SYSTEM_MOUNTPOINTS - {Path("/")}
         )
+
+
+class UnsupportedDeviceService:
+    def list_devices(self) -> list[UsbDevice]:
+        return []
+
+    def find_eligible_by_path(self, path: Path) -> UsbDevice | None:
+        return None

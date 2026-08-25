@@ -5,11 +5,10 @@ Local Ubuntu-first tool for preparing USB drives with Ventoy and bootable ISO fi
 ## Development Setup
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -e '.[dev]'
+uv python pin 3.12.7
+uv sync --extra dev
 cp config.example.yaml config.yaml
-ventoy-usb-factory
+uv run ventoy-usb-factory
 ```
 
 The web UI binds to `127.0.0.1` by default for local operation.
