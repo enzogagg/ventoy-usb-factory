@@ -100,6 +100,15 @@ def test_dashboard_script_uses_job_event_stream(tmp_path):
     assert "addEventListener(\"message\"" in response.text
 
 
+def test_dashboard_script_uses_popup_confirmation_instead_of_text_fields(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "window.confirm" in response.text
+    assert "CONFIRMED" in response.text
+    assert "ERASE ${path}" not in response.text
+
+
 def test_create_job_validation_returns_400_on_missing_confirmation(tmp_path, command_result):
     stdout = '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}'
     app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))
@@ -175,7 +184,7 @@ def test_job_events_streams_events_appended_after_connection(
         json={
             "device_paths": ["/dev/sdb"],
             "iso_keys": ["ubuntu"],
-            "confirmations": {"/dev/sdb": "ERASE /dev/sdb"},
+            "confirmations": {"/dev/sdb": "CONFIRMED"},
         },
     )
     job_id = job_response.json()["id"]

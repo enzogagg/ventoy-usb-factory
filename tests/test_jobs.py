@@ -75,18 +75,18 @@ def service(
     )
 
 
-def test_create_job_requires_exact_confirmation_per_device():
+def test_create_job_requires_popup_confirmation_per_device():
     job_service = service([device("/dev/sdb")])
 
     with pytest.raises(ValueError, match="confirmation"):
-        job_service.create_job([Path("/dev/sdb")], ["ubuntu"], {"/dev/sdb": "erase /dev/sdb"})
+        job_service.create_job([Path("/dev/sdb")], ["ubuntu"], {"/dev/sdb": "ERASE /dev/sdb"})
 
 
 def test_create_job_rejects_unsafe_device():
     job_service = service([device("/dev/sda", SafetyStatus.UNSAFE_SYSTEM_DISK)])
 
     with pytest.raises(ValueError, match="not eligible"):
-        job_service.create_job([Path("/dev/sda")], ["ubuntu"], {"/dev/sda": "ERASE /dev/sda"})
+        job_service.create_job([Path("/dev/sda")], ["ubuntu"], {"/dev/sda": "CONFIRMED"})
 
 
 def test_create_job_rejects_duplicate_device_paths():
@@ -96,7 +96,7 @@ def test_create_job_rejects_duplicate_device_paths():
         job_service.create_job(
             [Path("/dev/sdb"), Path("/dev/sdb")],
             ["ubuntu"],
-            {"/dev/sdb": "ERASE /dev/sdb"},
+            {"/dev/sdb": "CONFIRMED"},
         )
 
     assert job_service.list_jobs() == []
@@ -106,7 +106,7 @@ def test_run_job_calls_worker_and_marks_job_completed():
     worker = FakeWorker()
     isos = FakeIsoService([Path("/isos/ubuntu.iso")])
     job_service = service([device("/dev/sdb")], worker=worker, isos=isos)
-    job = job_service.create_job([Path("/dev/sdb")], ["ubuntu"], {"/dev/sdb": "ERASE /dev/sdb"})
+    job = job_service.create_job([Path("/dev/sdb")], ["ubuntu"], {"/dev/sdb": "CONFIRMED"})
 
     job_service.run_job(job.id)
 
@@ -123,7 +123,7 @@ def test_run_job_keeps_unrelated_drive_running_when_one_drive_fails():
     job = job_service.create_job(
         [Path("/dev/sdb"), Path("/dev/sdc")],
         ["ubuntu"],
-        {"/dev/sdb": "ERASE /dev/sdb", "/dev/sdc": "ERASE /dev/sdc"},
+        {"/dev/sdb": "CONFIRMED", "/dev/sdc": "CONFIRMED"},
     )
 
     job_service.run_job(job.id)
@@ -146,7 +146,7 @@ def test_run_job_handles_non_runtime_worker_failure_without_stopping_other_drive
     job = job_service.create_job(
         [Path("/dev/sdb"), Path("/dev/sdc")],
         ["ubuntu"],
-        {"/dev/sdb": "ERASE /dev/sdb", "/dev/sdc": "ERASE /dev/sdc"},
+        {"/dev/sdb": "CONFIRMED", "/dev/sdc": "CONFIRMED"},
     )
 
     job_service.run_job(job.id)
@@ -172,7 +172,7 @@ def test_run_job_refuses_when_no_ready_iso_paths():
     job = job_service.create_job(
         [Path("/dev/sdb"), Path("/dev/sdc")],
         ["ubuntu"],
-        {"/dev/sdb": "ERASE /dev/sdb", "/dev/sdc": "ERASE /dev/sdc"},
+        {"/dev/sdb": "CONFIRMED", "/dev/sdc": "CONFIRMED"},
     )
 
     job_service.run_job(job.id)

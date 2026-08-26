@@ -39,8 +39,7 @@ class JobService:
             device = current_devices.get(path)
             if device is None or device.safety != SafetyStatus.ELIGIBLE:
                 raise ValueError(f"Device {path} is not eligible")
-            expected_confirmation = f"ERASE {path}"
-            if confirmations.get(str(path)) != expected_confirmation:
+            if confirmations.get(str(path)) != "CONFIRMED":
                 raise ValueError(f"Exact confirmation required for {path}")
             drives.append(DriveJob(device=device))
 

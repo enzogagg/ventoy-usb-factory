@@ -4,7 +4,6 @@ const state = {
   jobs: [],
   selectedDevices: new Set(),
   selectedIsos: new Set(),
-  confirmations: {},
   initialIsoSelectionApplied: false,
   jobEventStreams: new Map(),
 };
@@ -195,27 +194,13 @@ function renderIsos() {
 function renderConfirmations() {
   els.confirmations.replaceChildren();
   for (const path of state.selectedDevices) {
-    const expected = `ERASE ${path}`;
-    const row = buildElement("label", "confirm-row");
-    const prompt = document.createElement("span");
+    const message = buildElement("p", "confirm-row");
     const pathLabel = buildElement("code", null, path);
-    const required = buildElement("strong", "mono", expected);
-    const input = document.createElement("input");
-
-    prompt.append("Required for ", pathLabel);
-    input.type = "text";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.value = state.confirmations[path] || "";
-    input.addEventListener("input", (event) => {
-      state.confirmations[path] = event.target.value;
-      updateStartState();
-    });
-    row.append(prompt, required, input);
-    els.confirmations.append(row);
+    message.append("A popup confirmation will be required for ", pathLabel);
+    els.confirmations.append(message);
   }
   if (state.selectedDevices.size === 0) {
-    els.confirmations.append(emptyCard("Select an eligible USB drive to reveal its confirmation string."));
+    els.confirmations.append(emptyCard("Select an eligible USB drive to enable popup confirmation."));
   }
 }
 
@@ -248,8 +233,23 @@ function renderJobs() {
 
 function updateStartState() {
   const devices = [...state.selectedDevices];
-  const allConfirmed = devices.length > 0 && devices.every((path) => state.confirmations[path] === `ERASE ${path}`);
-  els.start.disabled = !(allConfirmed && state.selectedIsos.size > 0);
+  els.start.disabled = !(devices.length > 0 && state.selectedIsos.size > 0);
+}
+
+function popupConfirmations(devices) {
+  const confirmations = {};
+  for (const path of devices) {
+    const device = state.devices.find((entry) => entry.path === path);
+    const details = [
+      `Device: ${path}`,
+      `Model: ${text([device?.vendor, device?.model].filter(Boolean).join(" "))}`,
+      `Size: ${formatBytes(device?.size_bytes)}`,
+      "Installing Ventoy will erase this USB drive.",
+    ].join("\n");
+    if (!window.confirm(details)) return null;
+    confirmations[path] = "CONFIRMED";
+  }
+  return confirmations;
 }
 
 function emptyCard(message) {
@@ -266,19 +266,21 @@ function clearError() {
 
 async function startJob() {
   clearError();
+  const devices = [...state.selectedDevices];
+  const confirmations = popupConfirmations(devices);
+  if (confirmations === null) return;
   try {
     const job = await fetchJson("/api/jobs", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        device_paths: [...state.selectedDevices],
+        device_paths: devices,
         iso_keys: [...state.selectedIsos],
-        confirmations: state.confirmations,
+        confirmations,
       }),
     });
     watchJobEvents(job);
     state.selectedDevices.clear();
-    state.confirmations = {};
     await refreshAll();
   } catch (error) {
     showError(error.message);
