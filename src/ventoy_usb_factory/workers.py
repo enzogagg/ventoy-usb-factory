@@ -61,7 +61,16 @@ class DriveWorker:
             self._emit(emit, job_id, device, JobStage.COPYING_ISOS, "Copying ISO files")
             for iso_path in iso_paths:
                 self._run(
-                    ["rsync", "-ah", "--progress", str(iso_path), str(mount_dir / iso_path.name)],
+                    [
+                        "rsync",
+                        "-rt",
+                        "--info=progress2",
+                        "--no-owner",
+                        "--no-group",
+                        "--no-perms",
+                        str(iso_path),
+                        str(mount_dir / iso_path.name),
+                    ],
                     emit,
                     job_id,
                     device,

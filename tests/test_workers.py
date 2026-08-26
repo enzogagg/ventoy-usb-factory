@@ -124,6 +124,37 @@ def test_prepare_drive_runs_ventoy_non_interactively_without_nested_sudo_when_ro
     assert not any(call and call[0] == "sudo" for call in runner.calls)
 
 
+def test_prepare_drive_copies_isos_without_preserving_ownership_or_permissions(
+    tmp_path: Path, command_result
+):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, refreshed_lsblk_stdout))
+    worker = DriveWorker(config(tmp_path), runner, LinuxDeviceService(runner))
+
+    worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], lambda event: None)
+
+    rsync_calls = [call for call in runner.calls if call and call[0] == "rsync"]
+    assert rsync_calls == [
+        [
+            "rsync",
+            "-rt",
+            "--info=progress2",
+            "--no-owner",
+            "--no-group",
+            "--no-perms",
+            str(tmp_path / "ubuntu.iso"),
+            str(tmp_path / "logs" / "mnt" / "sdb" / "ubuntu.iso"),
+        ]
+    ]
+
+
 @pytest.mark.parametrize(
     "lsblk_stdout",
     [
