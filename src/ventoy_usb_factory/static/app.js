@@ -1,3 +1,5 @@
+const jobAutoScroll = new Map();
+
 const state = {
   devices: [],
   isos: [],
@@ -242,55 +244,94 @@ function updateConcurrencyLimit() {
       : "Select multiple drives to increase parallel installations.";
 }
 
+function buildEventItem(event) {
+  const item = document.createElement("li");
+  const time = buildElement("time", null, formatEventTime(event.created_at));
+  const stage = buildElement("code", null, event.stage);
+  const device = buildElement("span", "mono", event.device_path);
+  const isCommandOutput = event.message.startsWith("stdout:") || event.message.startsWith("stderr:");
+  const message = buildElement("span", isCommandOutput ? "command-line" : null, event.message);
+  item.append(time, stage, device, message);
+  return item;
+}
+
+function buildJobTimeline(job) {
+  const list = buildElement("ol", "event-timeline");
+  list.dataset.jobId = job.id;
+  list.addEventListener("scroll", () => {
+    const nearBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 20;
+    jobAutoScroll.set(job.id, nearBottom);
+  });
+  if ((job.events || []).length === 0) {
+    list.append(buildElement("li", "empty", "Waiting for progress events."));
+  } else {
+    for (const event of job.events) list.append(buildEventItem(event));
+  }
+  return list;
+}
+
+function buildDrivesList(drives) {
+  const ul = document.createElement("ul");
+  for (const drive of drives) {
+    const item = document.createElement("li");
+    const devicePath = buildElement("code", null, drive.device.path);
+    item.append(devicePath, ` ${drive.status} / ${drive.stage}`);
+    if (drive.error) item.append(`: ${drive.error}`);
+    ul.append(item);
+  }
+  return ul;
+}
+
 function renderJobs() {
-  els.jobs.replaceChildren();
   if (state.jobs.length === 0) {
-    els.jobs.append(emptyCard("No preparation jobs yet."));
+    els.jobs.replaceChildren(emptyCard("No preparation jobs yet."));
     return;
   }
 
+  const existingCards = new Map();
+  for (const child of [...els.jobs.children]) {
+    if (child.dataset.jobId) existingCards.set(child.dataset.jobId, child);
+    else child.remove();
+  }
+
+  const currentJobIds = new Set(state.jobs.map((j) => j.id));
+  for (const [id, card] of existingCards) {
+    if (!currentJobIds.has(id)) card.remove();
+  }
+
   for (const job of state.jobs) {
-    const card = buildElement("article", "card job-card");
-    const head = buildElement("div", "job-head");
-    const id = buildElement("strong", null, job.id);
-    const status = buildElement("code", null, job.status);
-    const concurrency = buildElement(
-      "small",
-      null,
-      `parallel installs: ${job.max_concurrent_drives || 1}`,
-    );
-    const drives = document.createElement("ul");
-    const events = renderJobEvents(job);
+    if (existingCards.has(job.id)) {
+      const card = existingCards.get(job.id);
+      card.querySelector(".job-head code").textContent = job.status;
+      card.querySelector("ul").replaceWith(buildDrivesList(job.drives));
 
-    head.append(id, concurrency, status);
-    for (const drive of job.drives) {
-      const item = document.createElement("li");
-      const devicePath = buildElement("code", null, drive.device.path);
-      item.append(devicePath, ` ${drive.status} / ${drive.stage}`);
-      if (drive.error) item.append(`: ${drive.error}`);
-      drives.append(item);
+      const timeline = card.querySelector(".event-timeline");
+      const existingCount = timeline.querySelectorAll("li:not(.empty)").length;
+      const newEvents = (job.events || []).slice(existingCount);
+      if (newEvents.length > 0) {
+        timeline.querySelector(".empty")?.remove();
+        for (const event of newEvents) timeline.append(buildEventItem(event));
+        if (jobAutoScroll.get(job.id) !== false) {
+          requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
+        }
+      }
+    } else {
+      const card = buildElement("article", "card job-card");
+      card.dataset.jobId = job.id;
+      const head = buildElement("div", "job-head");
+      head.append(
+        buildElement("strong", null, job.id),
+        buildElement("small", null, `parallel installs: ${job.max_concurrent_drives || 1}`),
+        buildElement("code", null, job.status),
+      );
+      card.append(head, buildDrivesList(job.drives), buildJobTimeline(job));
+      els.jobs.append(card);
+      requestAnimationFrame(() => {
+        const tl = card.querySelector(".event-timeline");
+        if (tl) tl.scrollTop = tl.scrollHeight;
+      });
     }
-    card.append(head, drives, events);
-    els.jobs.append(card);
   }
-}
-
-function renderJobEvents(job) {
-  const list = buildElement("ol", "event-timeline");
-  for (const event of job.events || []) {
-    const item = document.createElement("li");
-    const time = buildElement("time", null, formatEventTime(event.created_at));
-    const stage = buildElement("code", null, event.stage);
-    const device = buildElement("span", "mono", event.device_path);
-    const isCommandOutput = event.message.startsWith("stdout:") || event.message.startsWith("stderr:");
-    const message = buildElement("span", isCommandOutput ? "command-line" : null, event.message);
-    item.append(time, stage, device, message);
-    list.append(item);
-  }
-  if (list.children.length === 0) {
-    list.append(buildElement("li", "empty", "Waiting for progress events."));
-  }
-  return list;
 }
 
 function updateStartState() {

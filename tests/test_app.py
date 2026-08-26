@@ -165,7 +165,7 @@ def test_dashboard_script_renders_job_event_timeline_and_root_status(tmp_path):
     response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
 
     assert response.status_code == 200
-    assert "renderJobEvents" in response.text
+    assert "buildJobTimeline" in response.text
     assert "data-status" in response.text
     assert "/api/status" in response.text
 
@@ -221,6 +221,19 @@ def test_dashboard_script_renders_command_events_with_time_and_concurrency(tmp_p
     assert "formatEventTime" in response.text
     assert "job.max_concurrent_drives" in response.text
     assert "command-line" in response.text
+
+
+def test_dashboard_script_preserves_scroll_position_on_log_update(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "jobAutoScroll" in response.text
+    assert "nearBottom" in response.text
+    assert "scrollTop" in response.text
+    assert "scrollHeight" in response.text
+    assert "requestAnimationFrame" in response.text
+    assert "buildEventItem" in response.text
+    assert "existingCards" in response.text
 
 
 def test_dashboard_styles_make_job_logs_scrollable(tmp_path):
