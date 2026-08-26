@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -37,11 +38,12 @@ class DriveWorker:
 
         self._emit(emit, job_id, device, JobStage.INSTALLING_VENTOY, "Installing Ventoy")
         self._run(
-            ["sudo", str(self.config.ventoy_installer), "-I", str(device.path)],
+            self._ventoy_install_command(device),
             emit,
             job_id,
             device,
             JobStage.INSTALLING_VENTOY,
+            input_text="y\ny\n",
         )
 
         self._emit(emit, job_id, device, JobStage.WAITING_FOR_PARTITIONS, "Refreshing partition table")
@@ -86,6 +88,7 @@ class DriveWorker:
         job_id: str | None = None,
         device: UsbDevice | None = None,
         stage: JobStage | None = None,
+        input_text: str | None = None,
     ) -> None:
         self.config.log_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.config.log_dir / "commands.log"
@@ -101,7 +104,7 @@ class DriveWorker:
                 self._emit(emit, job_id, device, stage, f"{stream}: {line}")
 
         try:
-            result = self.runner.run(args, on_output=on_output)
+            result = self.runner.run(args, on_output=on_output, input_text=input_text)
         except Exception as exc:
             with log_path.open("a", encoding="utf-8") as log_file:
                 log_file.write(f"END exception={type(exc).__name__}: {exc} {args!r}\n")
@@ -110,6 +113,12 @@ class DriveWorker:
             log_file.write(f"END returncode={result.returncode} {args!r}\n")
         if result.returncode != 0:
             raise RuntimeError(result.stderr or f"Command failed: {args}")
+
+    def _ventoy_install_command(self, device: UsbDevice) -> list[str]:
+        command = [str(self.config.ventoy_installer), "-I", str(device.path)]
+        if getattr(os, "geteuid", lambda: 1)() == 0:
+            return command
+        return ["sudo", *command]
 
     def _is_same_device(self, current: UsbDevice, confirmed: UsbDevice) -> bool:
         return (

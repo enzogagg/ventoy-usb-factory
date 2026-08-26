@@ -7,9 +7,17 @@ class FakeCommandRunner:
     def __init__(self, results: list[CommandResult]):
         self.results = list(results)
         self.calls: list[list[str]] = []
+        self.inputs: list[str | None] = []
 
-    def run(self, args: list[str], timeout: int | None = None, on_output=None) -> CommandResult:
+    def run(
+        self,
+        args: list[str],
+        timeout: int | None = None,
+        on_output=None,
+        input_text: str | None = None,
+    ) -> CommandResult:
         self.calls.append(args)
+        self.inputs.append(input_text)
         if not self.results:
             raise AssertionError(f"No fake result configured for {args}")
         result = self.results.pop(0)

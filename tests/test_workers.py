@@ -101,6 +101,29 @@ def test_prepare_drive_uses_argument_arrays_calls_installer_and_completes(
     assert ["sync"] in runner.calls
 
 
+def test_prepare_drive_runs_ventoy_non_interactively_without_nested_sudo_when_root(
+    tmp_path: Path, command_result, monkeypatch
+):
+    monkeypatch.setattr("ventoy_usb_factory.workers.os.geteuid", lambda: 0)
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, refreshed_lsblk_stdout))
+    app_config = config(tmp_path)
+    worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
+
+    worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], lambda event: None)
+
+    ventoy_call_index = runner.calls.index([str(app_config.ventoy_installer), "-I", "/dev/sdb"])
+    assert runner.inputs[ventoy_call_index] == "y\ny\n"
+    assert not any(call and call[0] == "sudo" for call in runner.calls)
+
+
 @pytest.mark.parametrize(
     "lsblk_stdout",
     [
@@ -244,7 +267,13 @@ def test_prepare_drive_unmounts_mounted_partition_when_rsync_fails(tmp_path: Pat
 @pytest.mark.parametrize("exception", [FileNotFoundError("missing binary"), ValueError("bad args")])
 def test_run_logs_end_when_command_runner_raises(tmp_path: Path, exception):
     class RaisingRunner:
-        def run(self, args: list[str], timeout: int | None = None, on_output=None):
+        def run(
+            self,
+            args: list[str],
+            timeout: int | None = None,
+            on_output=None,
+            input_text: str | None = None,
+        ):
             raise exception
 
     app_config = config(tmp_path)

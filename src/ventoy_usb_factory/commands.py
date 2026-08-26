@@ -21,6 +21,7 @@ class CommandRunner(Protocol):
         args: list[str],
         timeout: int | None = None,
         on_output: Callable[[str, str], None] | None = None,
+        input_text: str | None = None,
     ) -> CommandResult:
         raise NotImplementedError
 
@@ -31,6 +32,7 @@ class SubprocessCommandRunner:
         args: list[str],
         timeout: int | None = None,
         on_output: Callable[[str, str], None] | None = None,
+        input_text: str | None = None,
     ) -> CommandResult:
         process = subprocess.Popen(
             args,
@@ -38,7 +40,11 @@ class SubprocessCommandRunner:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE if input_text is not None else None,
         )
+        if process.stdin is not None and input_text is not None:
+            process.stdin.write(input_text)
+            process.stdin.close()
         output_queue: Queue[tuple[str, str | None]] = Queue()
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
