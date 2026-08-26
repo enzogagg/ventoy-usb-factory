@@ -96,5 +96,6 @@ class PreparationJob:
     id: str
     drives: list[DriveJob]
     iso_keys: list[str]
+    max_concurrent_drives: int = 1
     status: JobStatus = JobStatus.PENDING
     events: list[JobEvent] = field(default_factory=list)

@@ -27,6 +27,7 @@ class JobService:
         device_paths: list[Path],
         iso_keys: list[str],
         confirmations: dict[str, str],
+        max_concurrent_drives: int | None = None,
     ) -> PreparationJob:
         if not device_paths:
             raise ValueError("At least one device is required")
@@ -43,7 +44,14 @@ class JobService:
                 raise ValueError(f"Exact confirmation required for {path}")
             drives.append(DriveJob(device=device))
 
-        job = PreparationJob(id=str(uuid4()), drives=drives, iso_keys=list(iso_keys))
+        concurrency = max(1, int(max_concurrent_drives or self.max_concurrent_jobs))
+        concurrency = min(concurrency, len(drives))
+        job = PreparationJob(
+            id=str(uuid4()),
+            drives=drives,
+            iso_keys=list(iso_keys),
+            max_concurrent_drives=concurrency,
+        )
         with self._lock:
             self._jobs[job.id] = job
         return job
@@ -81,7 +89,7 @@ class JobService:
             return
 
         job.status = JobStatus.RUNNING
-        semaphore = Semaphore(self.max_concurrent_jobs)
+        semaphore = Semaphore(job.max_concurrent_drives)
 
         def run_drive(drive: DriveJob) -> None:
             with semaphore:

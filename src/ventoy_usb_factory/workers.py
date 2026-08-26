@@ -33,47 +33,75 @@ class DriveWorker:
         self._emit(emit, job_id, device, JobStage.UNMOUNTING, "Unmounting existing partitions")
         for partition in device.partitions:
             if partition.mountpoints:
-                self._run(["umount", str(partition.path)])
+                self._run(["umount", str(partition.path)], emit, job_id, device, JobStage.UNMOUNTING)
 
         self._emit(emit, job_id, device, JobStage.INSTALLING_VENTOY, "Installing Ventoy")
-        self._run(["sudo", str(self.config.ventoy_installer), "-I", str(device.path)])
+        self._run(
+            ["sudo", str(self.config.ventoy_installer), "-I", str(device.path)],
+            emit,
+            job_id,
+            device,
+            JobStage.INSTALLING_VENTOY,
+        )
 
         self._emit(emit, job_id, device, JobStage.WAITING_FOR_PARTITIONS, "Refreshing partition table")
-        self._run(["partprobe", str(device.path)])
+        self._run(["partprobe", str(device.path)], emit, job_id, device, JobStage.WAITING_FOR_PARTITIONS)
         refreshed = self.devices.find_eligible_by_path(device.path)
         if refreshed is None or not self._is_same_device(refreshed, device):
             raise RuntimeError(f"Device {device.path} is no longer eligible or changed identity")
         data_partition = self._data_partition(refreshed)
 
         self._emit(emit, job_id, device, JobStage.MOUNTING, "Mounting Ventoy data partition")
-        self._run(["mount", str(data_partition), str(mount_dir)])
+        self._run(["mount", str(data_partition), str(mount_dir)], emit, job_id, device, JobStage.MOUNTING)
         mounted = True
 
         try:
             self._emit(emit, job_id, device, JobStage.COPYING_ISOS, "Copying ISO files")
             for iso_path in iso_paths:
-                self._run(["rsync", "-ah", "--progress", str(iso_path), str(mount_dir / iso_path.name)])
+                self._run(
+                    ["rsync", "-ah", "--progress", str(iso_path), str(mount_dir / iso_path.name)],
+                    emit,
+                    job_id,
+                    device,
+                    JobStage.COPYING_ISOS,
+                )
 
             self._emit(emit, job_id, device, JobStage.SYNCING, "Syncing filesystem buffers")
-            self._run(["sync"])
+            self._run(["sync"], emit, job_id, device, JobStage.SYNCING)
 
             self._emit(emit, job_id, device, JobStage.UNMOUNTING_FINAL, "Unmounting Ventoy data partition")
             mounted = False
-            self._run(["umount", str(mount_dir)])
+            self._run(["umount", str(mount_dir)], emit, job_id, device, JobStage.UNMOUNTING_FINAL)
         except Exception:
             if mounted:
                 with suppress(Exception):
-                    self._run(["umount", str(mount_dir)])
+                    self._run(["umount", str(mount_dir)], emit, job_id, device, JobStage.UNMOUNTING_FINAL)
             raise
         self._emit(emit, job_id, device, JobStage.COMPLETE, "Drive complete")
 
-    def _run(self, args: list[str]) -> None:
+    def _run(
+        self,
+        args: list[str],
+        emit: Callable[[JobEvent], None] | None = None,
+        job_id: str | None = None,
+        device: UsbDevice | None = None,
+        stage: JobStage | None = None,
+    ) -> None:
         self.config.log_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.config.log_dir / "commands.log"
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(f"START {args!r}\n")
+        if emit and job_id and device and stage:
+            self._emit(emit, job_id, device, stage, f"command: {' '.join(args)}")
+
+        def on_output(stream: str, line: str) -> None:
+            with log_path.open("a", encoding="utf-8") as log_file:
+                log_file.write(f"{stream.upper()} {line}\n")
+            if emit and job_id and device and stage:
+                self._emit(emit, job_id, device, stage, f"{stream}: {line}")
+
         try:
-            result = self.runner.run(args)
+            result = self.runner.run(args, on_output=on_output)
         except Exception as exc:
             with log_path.open("a", encoding="utf-8") as log_file:
                 log_file.write(f"END exception={type(exc).__name__}: {exc} {args!r}\n")

@@ -8,11 +8,17 @@ class FakeCommandRunner:
         self.results = list(results)
         self.calls: list[list[str]] = []
 
-    def run(self, args: list[str], timeout: int | None = None) -> CommandResult:
+    def run(self, args: list[str], timeout: int | None = None, on_output=None) -> CommandResult:
         self.calls.append(args)
         if not self.results:
             raise AssertionError(f"No fake result configured for {args}")
-        return self.results.pop(0)
+        result = self.results.pop(0)
+        if on_output:
+            for line in result.stdout.splitlines():
+                on_output("stdout", line)
+            for line in result.stderr.splitlines():
+                on_output("stderr", line)
+        return result
 
 
 @pytest.fixture

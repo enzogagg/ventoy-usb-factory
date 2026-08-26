@@ -259,9 +259,21 @@ dd {
 
 .event-timeline li {
   display: grid;
-  grid-template-columns: minmax(150px, auto) minmax(90px, auto) 1fr;
+  grid-template-columns: minmax(82px, auto) minmax(150px, auto) minmax(90px, auto) 1fr;
   gap: 10px;
   align-items: baseline;
+}
+
+.event-timeline time {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.command-line {
+  color: #d8f3ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
 }
 
 .empty {

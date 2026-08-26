@@ -31,6 +31,7 @@ class CreateJobRequest(BaseModel):
     device_paths: list[str]
     iso_keys: list[str]
     confirmations: dict[str, str]
+    max_concurrent_drives: int | None = None
 
 
 def runtime_status() -> dict[str, Any]:
@@ -112,6 +113,7 @@ def create_app(config: AppConfig | None = None, runner: CommandRunner | None = N
                 [Path(path) for path in request.device_paths],
                 request.iso_keys,
                 request.confirmations,
+                request.max_concurrent_drives,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

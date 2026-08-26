@@ -183,6 +183,46 @@ def test_create_job_validation_returns_400_on_missing_confirmation(tmp_path, com
     assert "Exact confirmation required" in response.json()["detail"]
 
 
+def test_create_job_accepts_requested_concurrency_limit(tmp_path, command_result):
+    stdout = """
+    {"blockdevices":[
+      {"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]},
+      {"name":"sdc","path":"/dev/sdc","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"DEF","children":[]}
+    ]}
+    """
+    app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))
+
+    response = TestClient(app).post(
+        "/api/jobs",
+        json={
+            "device_paths": ["/dev/sdb", "/dev/sdc"],
+            "iso_keys": ["ubuntu"],
+            "confirmations": {"/dev/sdb": "CONFIRMED", "/dev/sdc": "CONFIRMED"},
+            "max_concurrent_drives": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["max_concurrent_drives"] == 2
+
+
+def test_dashboard_script_sends_requested_concurrency_limit(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "data-concurrency" in response.text
+    assert "max_concurrent_drives" in response.text
+
+
+def test_dashboard_script_renders_command_events_with_time_and_concurrency(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "formatEventTime" in response.text
+    assert "job.max_concurrent_drives" in response.text
+    assert "command-line" in response.text
+
+
 def test_missing_job_returns_404(tmp_path):
     app = create_app(app_config(tmp_path))
 
@@ -205,7 +245,7 @@ def test_job_events_streams_events_appended_after_connection(
             self.devices = devices
             self.job = None
 
-        def create_job(self, device_paths, iso_keys, confirmations):
+        def create_job(self, device_paths, iso_keys, confirmations, max_concurrent_drives=None):
             device = self.devices.list_devices()[0]
             self.job = PreparationJob(
                 id="job-1",

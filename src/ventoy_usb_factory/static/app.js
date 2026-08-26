@@ -19,6 +19,8 @@ const els = {
   summary: document.querySelector("[data-summary]"),
   status: document.querySelector("[data-status]"),
   refresh: document.querySelector("[data-refresh]"),
+  concurrency: document.querySelector("[data-concurrency]"),
+  concurrencyHint: document.querySelector("[data-concurrency-hint]"),
 };
 
 function formatBytes(value) {
@@ -35,6 +37,11 @@ function formatBytes(value) {
 
 function text(value, fallback = "unknown") {
   return value || fallback;
+}
+
+function formatEventTime(value) {
+  if (!value) return "--:--:--";
+  return new Date(value * 1000).toLocaleTimeString();
 }
 
 function buildElement(tagName, className, content) {
@@ -68,6 +75,7 @@ async function refreshAll() {
     state.jobs = jobs;
     applyInitialIsoSelection(isos);
     watchRunningJobs(jobs);
+    updateConcurrencyLimit();
     render();
   } catch (error) {
     showError(error.message);
@@ -220,6 +228,18 @@ function renderConfirmations() {
   if (state.selectedDevices.size === 0) {
     els.confirmations.append(emptyCard("Select an eligible USB drive to enable popup confirmation."));
   }
+  updateConcurrencyLimit();
+}
+
+function updateConcurrencyLimit() {
+  if (!els.concurrency) return;
+  const selectedCount = Math.max(1, state.selectedDevices.size);
+  els.concurrency.max = String(selectedCount);
+  if (Number(els.concurrency.value) > selectedCount) els.concurrency.value = String(selectedCount);
+  els.concurrencyHint.textContent =
+    state.selectedDevices.size > 1
+      ? `Up to ${selectedCount} selected drives can run at the same time.`
+      : "Select multiple drives to increase parallel installations.";
 }
 
 function renderJobs() {
@@ -234,10 +254,15 @@ function renderJobs() {
     const head = buildElement("div", "job-head");
     const id = buildElement("strong", null, job.id);
     const status = buildElement("code", null, job.status);
+    const concurrency = buildElement(
+      "small",
+      null,
+      `parallel installs: ${job.max_concurrent_drives || 1}`,
+    );
     const drives = document.createElement("ul");
     const events = renderJobEvents(job);
 
-    head.append(id, status);
+    head.append(id, concurrency, status);
     for (const drive of job.drives) {
       const item = document.createElement("li");
       const devicePath = buildElement("code", null, drive.device.path);
@@ -254,10 +279,12 @@ function renderJobEvents(job) {
   const list = buildElement("ol", "event-timeline");
   for (const event of job.events || []) {
     const item = document.createElement("li");
+    const time = buildElement("time", null, formatEventTime(event.created_at));
     const stage = buildElement("code", null, event.stage);
     const device = buildElement("span", "mono", event.device_path);
-    const message = buildElement("span", null, event.message);
-    item.append(stage, device, message);
+    const isCommandOutput = event.message.startsWith("stdout:") || event.message.startsWith("stderr:");
+    const message = buildElement("span", isCommandOutput ? "command-line" : null, event.message);
+    item.append(time, stage, device, message);
     list.append(item);
   }
   if (list.children.length === 0) {
@@ -312,6 +339,7 @@ async function startJob() {
         device_paths: devices,
         iso_keys: [...state.selectedIsos],
         confirmations,
+        max_concurrent_drives: Number(els.concurrency?.value || 1),
       }),
     });
     watchJobEvents(job);
@@ -324,6 +352,7 @@ async function startJob() {
 
 els.start.addEventListener("click", startJob);
 els.refresh.addEventListener("click", refreshAll);
+els.concurrency?.addEventListener("input", updateConcurrencyLimit);
 setInterval(async () => {
   try {
     state.jobs = await fetchJson("/api/jobs");

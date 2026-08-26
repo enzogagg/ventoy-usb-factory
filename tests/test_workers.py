@@ -142,6 +142,74 @@ def test_prepare_drive_logs_before_and_after_commands(tmp_path: Path, command_re
     assert "END returncode=0 ['sudo'" in log_text
 
 
+def test_prepare_drive_emits_live_command_output(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    runner = FakeCommandRunner(
+        [
+            command_result(["lsblk"], stdout=lsblk_stdout),
+            command_result(["umount"]),
+            command_result(["ventoy"], stdout="formatting disk\nwriting bootloader\n", stderr="warning line\n"),
+            command_result(["partprobe"]),
+            command_result(["lsblk"], stdout=refreshed_lsblk_stdout),
+            command_result(["mount"]),
+            command_result(["rsync"], stdout="ubuntu.iso 42%\n"),
+            command_result(["sync"]),
+            command_result(["umount"]),
+        ]
+    )
+    events: list[JobEvent] = []
+    worker = DriveWorker(config(tmp_path), runner, LinuxDeviceService(runner))
+
+    worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], events.append)
+
+    assert any(
+        event.stage == JobStage.INSTALLING_VENTOY and event.message == "stdout: formatting disk"
+        for event in events
+    )
+    assert any(
+        event.stage == JobStage.INSTALLING_VENTOY and event.message == "stdout: writing bootloader"
+        for event in events
+    )
+    assert any(
+        event.stage == JobStage.INSTALLING_VENTOY and event.message == "stderr: warning line"
+        for event in events
+    )
+    assert any(
+        event.stage == JobStage.COPYING_ISOS and event.message == "stdout: ubuntu.iso 42%"
+        for event in events
+    )
+
+
+def test_prepare_drive_emits_started_command_line(tmp_path: Path, command_result):
+    lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
+    """
+    refreshed_lsblk_stdout = """
+    {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[
+      {"name":"sdb1","path":"/dev/sdb1","type":"part","mountpoints":[],"fstype":"exfat","label":"Ventoy"}
+    ]}]}
+    """
+    runner = FakeCommandRunner(successful_results(command_result, lsblk_stdout, refreshed_lsblk_stdout))
+    events: list[JobEvent] = []
+    app_config = config(tmp_path)
+    worker = DriveWorker(app_config, runner, LinuxDeviceService(runner))
+
+    worker.prepare_drive("job-1", eligible_device(), [tmp_path / "ubuntu.iso"], events.append)
+
+    assert any(
+        event.stage == JobStage.INSTALLING_VENTOY
+        and event.message == f"command: sudo {app_config.ventoy_installer} -I /dev/sdb"
+        for event in events
+    )
+
+
 def test_prepare_drive_unmounts_mounted_partition_when_rsync_fails(tmp_path: Path, command_result):
     lsblk_stdout = """
     {"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}
@@ -176,7 +244,7 @@ def test_prepare_drive_unmounts_mounted_partition_when_rsync_fails(tmp_path: Pat
 @pytest.mark.parametrize("exception", [FileNotFoundError("missing binary"), ValueError("bad args")])
 def test_run_logs_end_when_command_runner_raises(tmp_path: Path, exception):
     class RaisingRunner:
-        def run(self, args: list[str]):
+        def run(self, args: list[str], timeout: int | None = None, on_output=None):
             raise exception
 
     app_config = config(tmp_path)

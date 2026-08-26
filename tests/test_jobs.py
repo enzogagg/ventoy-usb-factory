@@ -102,6 +102,32 @@ def test_create_job_rejects_duplicate_device_paths():
     assert job_service.list_jobs() == []
 
 
+def test_create_job_records_requested_concurrency_limit():
+    job_service = service([device("/dev/sdb"), device("/dev/sdc"), device("/dev/sdd")])
+
+    job = job_service.create_job(
+        [Path("/dev/sdb"), Path("/dev/sdc"), Path("/dev/sdd")],
+        ["ubuntu"],
+        {"/dev/sdb": "CONFIRMED", "/dev/sdc": "CONFIRMED", "/dev/sdd": "CONFIRMED"},
+        max_concurrent_drives=3,
+    )
+
+    assert job.max_concurrent_drives == 3
+
+
+def test_create_job_clamps_requested_concurrency_to_selected_drive_count():
+    job_service = service([device("/dev/sdb"), device("/dev/sdc")])
+
+    job = job_service.create_job(
+        [Path("/dev/sdb"), Path("/dev/sdc")],
+        ["ubuntu"],
+        {"/dev/sdb": "CONFIRMED", "/dev/sdc": "CONFIRMED"},
+        max_concurrent_drives=99,
+    )
+
+    assert job.max_concurrent_drives == 2
+
+
 def test_run_job_calls_worker_and_marks_job_completed():
     worker = FakeWorker()
     isos = FakeIsoService([Path("/isos/ubuntu.iso")])
