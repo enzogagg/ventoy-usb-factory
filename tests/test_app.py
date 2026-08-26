@@ -223,6 +223,16 @@ def test_dashboard_script_renders_command_events_with_time_and_concurrency(tmp_p
     assert "command-line" in response.text
 
 
+def test_dashboard_styles_make_job_logs_scrollable(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/styles.css")
+
+    assert response.status_code == 200
+    assert ".event-timeline" in response.text
+    assert "max-height:" in response.text
+    assert "overflow-y: auto" in response.text
+    assert "overscroll-behavior: contain" in response.text
+
+
 def test_missing_job_returns_404(tmp_path):
     app = create_app(app_config(tmp_path))
 

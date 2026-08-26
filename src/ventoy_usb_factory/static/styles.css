@@ -255,6 +255,9 @@ dd {
   gap: 8px;
   margin: 14px 0 0;
   padding-left: 20px;
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .event-timeline li {
