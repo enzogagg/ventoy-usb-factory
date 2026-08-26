@@ -32,6 +32,58 @@ def test_api_lists_devices(tmp_path, command_result):
     assert response.json()[0]["safety"] == "eligible"
 
 
+def test_api_devices_only_lists_eligible_drives(tmp_path, command_result):
+    stdout = """
+    {"blockdevices":[
+      {"name":"sda","path":"/dev/sda","type":"disk","rm":false,"tran":"sata","size":512000000000,"model":"SSD","vendor":"ATA","serial":"SYS","children":[
+        {"name":"sda2","path":"/dev/sda2","type":"part","mountpoints":["/"],"fstype":"ext4","label":"root"}
+      ]},
+      {"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}
+    ]}
+    """
+    app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))
+
+    response = TestClient(app).get("/api/devices")
+
+    assert response.status_code == 200
+    assert [device["path"] for device in response.json()] == ["/dev/sdb"]
+
+
+def test_api_status_reports_linux_root_requirement(tmp_path, monkeypatch):
+    monkeypatch.setattr("ventoy_usb_factory.app.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ventoy_usb_factory.app.os.geteuid", lambda: 1000)
+
+    response = TestClient(create_app(app_config(tmp_path))).get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "platform": "Linux",
+        "root_required": True,
+        "running_as_root": False,
+        "can_prepare": False,
+        "message": "Start with sudo to install Ventoy on USB drives.",
+    }
+
+
+def test_create_job_requires_root_on_linux(tmp_path, command_result, monkeypatch):
+    monkeypatch.setattr("ventoy_usb_factory.app.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ventoy_usb_factory.app.os.geteuid", lambda: 1000)
+    stdout = '{"blockdevices":[{"name":"sdb","path":"/dev/sdb","type":"disk","rm":true,"tran":"usb","size":16000000000,"model":"Flash","vendor":"USB","serial":"ABC","children":[]}]}'
+    app = create_app(app_config(tmp_path), FakeCommandRunner([command_result(["lsblk"], stdout=stdout)]))
+
+    response = TestClient(app).post(
+        "/api/jobs",
+        json={
+            "device_paths": ["/dev/sdb"],
+            "iso_keys": ["ubuntu"],
+            "confirmations": {"/dev/sdb": "CONFIRMED"},
+        },
+    )
+
+    assert response.status_code == 403
+    assert "sudo" in response.json()["detail"]
+
+
 def test_api_lists_isos(tmp_path):
     app = create_app(app_config(tmp_path))
 
@@ -107,6 +159,15 @@ def test_dashboard_script_uses_popup_confirmation_instead_of_text_fields(tmp_pat
     assert "window.confirm" in response.text
     assert "CONFIRMED" in response.text
     assert "ERASE ${path}" not in response.text
+
+
+def test_dashboard_script_renders_job_event_timeline_and_root_status(tmp_path):
+    response = TestClient(create_app(app_config(tmp_path))).get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "renderJobEvents" in response.text
+    assert "data-status" in response.text
+    assert "/api/status" in response.text
 
 
 def test_create_job_validation_returns_400_on_missing_confirmation(tmp_path, command_result):

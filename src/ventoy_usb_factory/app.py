@@ -1,4 +1,5 @@
 import json
+import os
 import platform
 import time
 from dataclasses import asdict, is_dataclass
@@ -30,6 +31,25 @@ class CreateJobRequest(BaseModel):
     device_paths: list[str]
     iso_keys: list[str]
     confirmations: dict[str, str]
+
+
+def runtime_status() -> dict[str, Any]:
+    platform_name = platform.system()
+    root_required = platform_name == "Linux"
+    running_as_root = bool(getattr(os, "geteuid", lambda: 1)() == 0)
+    can_prepare = not root_required or running_as_root
+    message = (
+        "Start with sudo to install Ventoy on USB drives."
+        if root_required and not running_as_root
+        else "Ready to prepare eligible USB drives."
+    )
+    return {
+        "platform": platform_name,
+        "root_required": root_required,
+        "running_as_root": running_as_root,
+        "can_prepare": can_prepare,
+        "message": message,
+    }
 
 
 def encode(value: Any) -> Any:
@@ -68,7 +88,11 @@ def create_app(config: AppConfig | None = None, runner: CommandRunner | None = N
 
     @app.get("/api/devices")
     def api_devices():
-        return encode(device_service.list_devices())
+        return encode([device for device in device_service.list_devices() if device.safety.value == "eligible"])
+
+    @app.get("/api/status")
+    def api_status():
+        return runtime_status()
 
     @app.get("/api/isos")
     def api_isos():
@@ -80,6 +104,9 @@ def create_app(config: AppConfig | None = None, runner: CommandRunner | None = N
 
     @app.post("/api/jobs")
     def api_create_job(request: CreateJobRequest):
+        status = runtime_status()
+        if not status["can_prepare"]:
+            raise HTTPException(status_code=403, detail=status["message"])
         try:
             job = job_service.create_job(
                 [Path(path) for path in request.device_paths],

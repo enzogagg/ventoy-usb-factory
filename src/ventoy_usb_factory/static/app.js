@@ -2,6 +2,7 @@ const state = {
   devices: [],
   isos: [],
   jobs: [],
+  status: null,
   selectedDevices: new Set(),
   selectedIsos: new Set(),
   initialIsoSelectionApplied: false,
@@ -16,6 +17,7 @@ const els = {
   start: document.querySelector("[data-start]"),
   error: document.querySelector("[data-error]"),
   summary: document.querySelector("[data-summary]"),
+  status: document.querySelector("[data-status]"),
   refresh: document.querySelector("[data-refresh]"),
 };
 
@@ -54,11 +56,13 @@ async function fetchJson(url, options) {
 async function refreshAll() {
   clearError();
   try {
-    const [devices, isos, jobs] = await Promise.all([
+    const [status, devices, isos, jobs] = await Promise.all([
+      fetchJson("/api/status"),
       fetchJson("/api/devices"),
       fetchJson("/api/isos"),
       fetchJson("/api/jobs"),
     ]);
+    state.status = status;
     state.devices = devices;
     state.isos = isos;
     state.jobs = jobs;
@@ -116,12 +120,26 @@ function applyInitialIsoSelection(isos) {
 }
 
 function render() {
+  renderStatus();
   renderDevices();
   renderIsos();
   renderConfirmations();
   renderJobs();
   updateStartState();
   els.summary.textContent = `${state.devices.length} devices scanned, ${state.selectedDevices.size} selected`;
+}
+
+function renderStatus() {
+  els.status.replaceChildren();
+  if (!state.status) return;
+  const message = buildElement("strong", null, state.status.message);
+  const details = buildElement(
+    "small",
+    null,
+    `Platform: ${state.status.platform} / root: ${state.status.running_as_root ? "yes" : "no"}`,
+  );
+  els.status.classList.toggle("danger", !state.status.can_prepare);
+  els.status.append(message, details);
 }
 
 function renderDevices() {
@@ -217,6 +235,7 @@ function renderJobs() {
     const id = buildElement("strong", null, job.id);
     const status = buildElement("code", null, job.status);
     const drives = document.createElement("ul");
+    const events = renderJobEvents(job);
 
     head.append(id, status);
     for (const drive of job.drives) {
@@ -226,14 +245,30 @@ function renderJobs() {
       if (drive.error) item.append(`: ${drive.error}`);
       drives.append(item);
     }
-    card.append(head, drives);
+    card.append(head, drives, events);
     els.jobs.append(card);
   }
 }
 
+function renderJobEvents(job) {
+  const list = buildElement("ol", "event-timeline");
+  for (const event of job.events || []) {
+    const item = document.createElement("li");
+    const stage = buildElement("code", null, event.stage);
+    const device = buildElement("span", "mono", event.device_path);
+    const message = buildElement("span", null, event.message);
+    item.append(stage, device, message);
+    list.append(item);
+  }
+  if (list.children.length === 0) {
+    list.append(buildElement("li", "empty", "Waiting for progress events."));
+  }
+  return list;
+}
+
 function updateStartState() {
   const devices = [...state.selectedDevices];
-  els.start.disabled = !(devices.length > 0 && state.selectedIsos.size > 0);
+  els.start.disabled = !(devices.length > 0 && state.selectedIsos.size > 0 && state.status?.can_prepare);
 }
 
 function popupConfirmations(devices) {

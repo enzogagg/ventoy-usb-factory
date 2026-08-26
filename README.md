@@ -13,6 +13,12 @@ uv run ventoy-usb-factory
 
 The web UI binds to `127.0.0.1` by default for local operation.
 
+On Ubuntu, real Ventoy installation requires root privileges:
+
+```bash
+sudo env "PATH=$PATH" uv run ventoy-usb-factory
+```
+
 ## Ventoy Setup
 
 Download the official Ventoy Linux release from https://www.ventoy.net/ and extract it to `./ventoy` so `./ventoy/Ventoy2Disk.sh` exists.
@@ -29,6 +35,6 @@ Copy `config.example.yaml` to `config.yaml` and adjust local paths as needed.
 
 WARNING: Installing Ventoy erases the selected USB drive. Verify the device path, model, and size before confirming.
 
-This tool is destructive. It never auto-selects USB drives. Each selected drive requires the exact confirmation string shown in the UI.
+This tool is destructive. It never auto-selects USB drives. Each selected drive requires a browser confirmation popup before preparation starts.
 
 No hardware test should be run by default. Real destructive tests require explicit tester consent and disposable USB drives.

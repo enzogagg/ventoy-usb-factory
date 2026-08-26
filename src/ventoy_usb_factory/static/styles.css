@@ -226,15 +226,6 @@ dd {
   gap: 10px;
 }
 
-.confirm-row input {
-  width: 100%;
-  border: 1px solid var(--line);
-  background: #0c0f12;
-  color: var(--text);
-  padding: 12px;
-  font-family: "SFMono-Regular", Consolas, monospace;
-}
-
 .start-button {
   width: 100%;
   border-color: var(--danger);
@@ -257,6 +248,20 @@ dd {
 .job-card ul {
   margin: 12px 0 0;
   padding-left: 20px;
+}
+
+.event-timeline {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding-left: 20px;
+}
+
+.event-timeline li {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(90px, auto) 1fr;
+  gap: 10px;
+  align-items: baseline;
 }
 
 .empty {
